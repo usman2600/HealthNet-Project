@@ -9,7 +9,12 @@ const app = express();
 
 // Security middleware
 app.use(helmet());
-app.use(cors({ origin: process.env.CLIENT_ORIGIN || "*" }));
+app.use(cors({
+  origin: "*",
+  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization"],
+}));
+app.options("*", cors());
 app.use(express.json({ limit: "1mb" }));
 app.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 100, message: "Too many requests" }));
 
@@ -31,6 +36,6 @@ app.use((err, req, res, next) => {
 
 const PORT = process.env.PORT || 5000;
 
-connectDB()
-  .then(() => app.listen(PORT, () => console.log(`HealthNet API running on port ${PORT}`)))
-  .catch((err) => { console.error("DB connection failed:", err); process.exit(1); });
+app.listen(PORT, () => console.log(`HealthNet API running on port ${PORT}`));
+
+connectDB().catch((err) => console.error("DB connection failed (server still running):", err.message));

@@ -20,9 +20,9 @@ const STATUS: Record<string, { color: string; bg: string; icon: string }> = {
   pending:   { color: C.warning, bg: C.warningLight,    icon: "time" },
 };
 
-const MERCHANT_CODE = "MX276417";
-const PAY_ITEM_ID   = "Default_Payable_MX276417";
-const CHECKOUT_URL  = "https://newwebpay.qa.interswitchng.com/inline-checkout.js";
+const MERCHANT_CODE = "MX180552";
+const PAY_ITEM_ID   = "Default_Payable_MX180552";
+const CHECKOUT_URL  = "https://newwebpay.interswitchng.com/inline-checkout.js";
 
 export default function PaymentsScreen() {
   const { toast, show, hide } = useToast();
@@ -137,7 +137,7 @@ export default function PaymentsScreen() {
               currency: 566,
               cust_email: '${custEmail}',
               cust_name: '${custName}',
-              mode: 'TEST',
+              mode: 'LIVE',
               onComplete: function(resp) { window.ReactNativeWebView.postMessage(JSON.stringify(resp)); }
             });
           } else if (attempts > 20) {
@@ -174,7 +174,7 @@ export default function PaymentsScreen() {
           </View>
           {txnRef && (
             <WebView
-              source={{ uri: "https://newwebpay.qa.interswitchng.com" }}
+              source={{ uri: "https://newwebpay.interswitchng.com" }}
               injectedJavaScript={getInjectedJS(txnRef, amountKobo, custEmail, custName)}
               onMessage={handleMessage}
               javaScriptEnabled domStorageEnabled originWhitelist={["*"]} style={{ flex: 1 }}

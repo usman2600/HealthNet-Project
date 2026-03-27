@@ -13,6 +13,7 @@ const paymentSchema = new mongoose.Schema(
     // Local log for offline verification
     localId: { type: String },
     lastModified: { type: Date, default: Date.now },
+    _formMeta: { type: mongoose.Schema.Types.Mixed },
   },
   { timestamps: true }
 );

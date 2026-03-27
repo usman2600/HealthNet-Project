@@ -39,7 +39,7 @@ router.post("/initiate", protect, async (req, res) => {
     const transactionRef = generateRef();
     const amountInKobo = Math.round(parseFloat(amount) * 100);
 
-    const payment = await Payment.create({
+    await Payment.create({
       patient: patientId,
       amount: parseFloat(amount),
       service,
@@ -49,31 +49,61 @@ router.post("/initiate", protect, async (req, res) => {
     });
 
     // Interswitch Webpay hash: SHA512(clientId + transactionRef + amountInKobo)
-    const hashInput = `${CLIENT_ID}${transactionRef}${amountInKobo}`;
-    const hash = crypto.createHash("sha512").update(hashInput).digest("hex");
+    const hash = crypto
+      .createHash("sha512")
+      .update(`${CLIENT_ID}${transactionRef}${amountInKobo}`)
+      .digest("hex");
 
     const redirectUrl = `https://healthnet-project-production.up.railway.app/api/payments/verify/${transactionRef}`;
+    const custEmail = email || "patient@healthnet.ng";
 
-    const params = new URLSearchParams({
-      merchantcode: MERCHANT_CODE,
-      payableCode: PAYABLE_CODE,
-      amount: amountInKobo.toString(),
-      txnref: transactionRef,
-      currency: "566",
-      cust_email: email || "patient@healthnet.ng",
-      cust_id: email || "patient@healthnet.ng",
-      hash,
-      redirect_url: redirectUrl,
-      site_redirect_url: redirectUrl,
-    });
+    // Return a self-submitting HTML POST form — WebView loads this URL which auto-posts to Interswitch
+    const formUrl = `https://healthnet-project-production.up.railway.app/api/payments/form/${transactionRef}`;
 
-    // Interswitch Webpay sandbox checkout
-    const paymentUrl = `${BASE_URL}/webpay/pay?${params.toString()}`;
+    // Store form data temporarily on the payment record so /form can render it
+    await Payment.findOneAndUpdate(
+      { transactionRef },
+      { $set: { _formMeta: { amountInKobo, hash, redirectUrl, custEmail } } }
+    );
 
-    res.json({ transactionRef, payment, paymentUrl });
+    res.json({ transactionRef, formUrl });
   } catch (err) {
     console.error("Initiate error:", err.response?.data || err.message);
     res.status(500).json({ message: err.response?.data?.message || err.message });
+  }
+});
+
+// GET /api/payments/form/:ref  — PUBLIC: serves self-submitting POST form to WebView
+router.get("/form/:ref", async (req, res) => {
+  try {
+    const payment = await Payment.findOne({ transactionRef: req.params.ref }).lean();
+    if (!payment) return res.status(404).send("Not found");
+
+    const { amountInKobo, hash, redirectUrl, custEmail } = payment._formMeta || {};
+    if (!amountInKobo) return res.status(400).send("Form data missing");
+
+    const webpayUrl = `${BASE_URL}/webpay/pay`;
+
+    res.send(`<!DOCTYPE html><html><head><meta name="viewport" content="width=device-width,initial-scale=1">
+<style>body{margin:0;display:flex;align-items:center;justify-content:center;height:100vh;font-family:sans-serif;background:#f0fdf4}
+.box{text-align:center;padding:24px}.spinner{width:40px;height:40px;border:4px solid #e5e7eb;border-top-color:#16a34a;border-radius:50%;animation:spin 0.8s linear infinite;margin:0 auto 16px}
+@keyframes spin{to{transform:rotate(360deg)}}p{color:#6b7280;font-size:14px}</style></head>
+<body><div class="box"><div class="spinner"></div><p>Connecting to Interswitch…</p></div>
+<form id="f" method="POST" action="${webpayUrl}">
+  <input type="hidden" name="merchantcode" value="${MERCHANT_CODE}" />
+  <input type="hidden" name="payableCode" value="${PAYABLE_CODE}" />
+  <input type="hidden" name="amount" value="${amountInKobo}" />
+  <input type="hidden" name="txnref" value="${req.params.ref}" />
+  <input type="hidden" name="currency" value="566" />
+  <input type="hidden" name="cust_email" value="${custEmail}" />
+  <input type="hidden" name="cust_id" value="${custEmail}" />
+  <input type="hidden" name="hash" value="${hash}" />
+  <input type="hidden" name="redirect_url" value="${redirectUrl}" />
+  <input type="hidden" name="site_redirect_url" value="${redirectUrl}" />
+</form>
+<script>document.getElementById('f').submit();</script></body></html>`);
+  } catch (err) {
+    res.status(500).send("Error");
   }
 });
 

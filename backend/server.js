@@ -16,6 +16,7 @@ app.use(cors({
 }));
 app.options("*", cors());
 app.use(express.json({ limit: "1mb" }));
+app.set("trust proxy", 1);
 app.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 100, message: "Too many requests" }));
 
 // Routes

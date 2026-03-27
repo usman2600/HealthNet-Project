@@ -20,8 +20,8 @@ const STATUS_CONFIG: Record<string, { color: string; bg: string; icon: string }>
 };
 
 // Interswitch shared sandbox credentials
-const MERCHANT_CODE = "MX6072";
-const PAY_ITEM_ID   = "9405967";
+const MERCHANT_CODE = "MX276417";
+const PAY_ITEM_ID   = "Default_Payable_MX276417";
 const CHECKOUT_URL  = "https://newwebpay.qa.interswitchng.com/inline-checkout.js";
 
 export default function PaymentsScreen() {

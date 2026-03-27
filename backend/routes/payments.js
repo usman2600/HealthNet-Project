@@ -55,7 +55,7 @@ router.get("/debug", protect, async (req, res) => {
       });
       interswitchReachable = true;
       interswitchResponse = r.data;
-    } catch (e: any) {
+    } catch (e) {
       interswitchReachable = e.response ? true : false;
       interswitchResponse = e.response?.data || e.message;
     }

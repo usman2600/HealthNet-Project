@@ -4,8 +4,6 @@ const axios = require("axios");
 const Payment = require("../models/Payment");
 const { protect } = require("../middleware/auth");
 
-router.use(protect);
-
 const BASE_URL = process.env.INTERSWITCH_BASE_URL;
 const CLIENT_ID = process.env.INTERSWITCH_CLIENT_ID;
 const CLIENT_SECRET = process.env.INTERSWITCH_CLIENT_SECRET;
@@ -31,8 +29,8 @@ async function getAccessToken() {
   return data.access_token;
 }
 
-// POST /api/payments/initiate
-router.post("/initiate", async (req, res) => {
+// POST /api/payments/initiate  (protected)
+router.post("/initiate", protect, async (req, res) => {
   try {
     const { patientId, amount, service, email } = req.body;
     if (!patientId || !amount || !service)
@@ -80,7 +78,7 @@ router.post("/initiate", async (req, res) => {
   }
 });
 
-// GET /api/payments/verify/:ref  — called after redirect OR manually from app
+// GET /api/payments/verify/:ref  — PUBLIC: called by Interswitch redirect OR app
 router.get("/verify/:ref", async (req, res) => {
   try {
     const payment = await Payment.findOne({ transactionRef: req.params.ref });
@@ -112,8 +110,8 @@ router.get("/verify/:ref", async (req, res) => {
   }
 });
 
-// GET /api/payments/patient/:patientId
-router.get("/patient/:patientId", async (req, res) => {
+// GET /api/payments/patient/:patientId  (protected)
+router.get("/patient/:patientId", protect, async (req, res) => {
   try {
     const payments = await Payment.find({ patient: req.params.patientId }).sort({ createdAt: -1 });
     res.json(payments);

@@ -67,7 +67,7 @@ router.get("/debug", protect, async (req, res) => {
       interswitchReachable,
       interswitchResponse,
     });
-  } catch (err: any) {
+  } catch (err) {
     res.status(500).json({ message: err.message });
   }
 });

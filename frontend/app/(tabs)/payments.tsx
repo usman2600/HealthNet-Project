@@ -1,9 +1,10 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import {
   View, Text, StyleSheet, TextInput, TouchableOpacity,
   ScrollView, ActivityIndicator, FlatList, Modal,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
+import { WebView } from "react-native-webview";
 import api from "@/lib/api";
 import Toast from "@/components/Toast";
 import { useToast } from "@/hooks/use-toast";
@@ -27,9 +28,13 @@ export default function PaymentsScreen() {
   const [form, setForm] = useState({ service: "", amount: "", email: "" });
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(false);
+  const [webviewUrl, setWebviewUrl] = useState<string | null>(null);
+  const [webviewVisible, setWebviewVisible] = useState(false);
+  const [pendingRef, setPendingRef] = useState<string | null>(null);
   const [history, setHistory] = useState<Payment[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [receipt, setReceipt] = useState<any>(null);
+  const verifying = useRef(false);
 
   useEffect(() => {
     api.get("/patients?limit=100").then(({ data }) => {
@@ -37,16 +42,21 @@ export default function PaymentsScreen() {
     }).catch(() => {});
   }, []);
 
-  // Auto-load history when patient is selected
   useEffect(() => {
+    if (!selected) return;
+    loadHistory();
+  }, [selected]);
+
+  const loadHistory = async () => {
     if (!selected) return;
     setHistoryLoading(true);
     setHistory([]);
-    api.get(`/payments/patient/${selected._id}`)
-      .then(({ data }) => setHistory(data))
-      .catch(() => {})
-      .finally(() => setHistoryLoading(false));
-  }, [selected]);
+    try {
+      const { data } = await api.get(`/payments/patient/${selected._id}`);
+      setHistory(data);
+    } catch {}
+    finally { setHistoryLoading(false); }
+  };
 
   const filtered = patients.filter((p) =>
     p.name?.toLowerCase().includes(search.toLowerCase())
@@ -77,14 +87,29 @@ export default function PaymentsScreen() {
         service: form.service,
         email: form.email,
       });
-      setReceipt(data);
-      show(`Payment initiated · Ref: ${data.transactionRef}`, "success");
-      // Refresh history
-      const h = await api.get(`/payments/patient/${selected!._id}`);
-      setHistory(h.data);
+
+      setPendingRef(data.transactionRef);
+      setWebviewUrl(data.paymentUrl);
+      setWebviewVisible(true);
     } catch (err: any) {
       show(err.message || "Payment failed. Please try again.", "error");
     } finally { setLoading(false); }
+  };
+
+  const verifyPayment = async (ref: string) => {
+    if (verifying.current) return;
+    verifying.current = true;
+    setWebviewVisible(false);
+    try {
+      const { data } = await api.get(`/payments/status/${ref}`);
+      setReceipt(data);
+      setPendingRef(null);
+      setWebviewUrl(null);
+      show(data.status === "success" ? "Payment confirmed!" : "Payment not confirmed. Try again.", data.status === "success" ? "success" : "warning");
+      await loadHistory();
+    } catch (err: any) {
+      show(err.message || "Could not verify payment.", "error");
+    } finally { verifying.current = false; }
   };
 
   const cfg = (status: string) => STATUS_CONFIG[status] ?? STATUS_CONFIG.pending;
@@ -92,6 +117,37 @@ export default function PaymentsScreen() {
   return (
     <View style={{ flex: 1 }}>
       {toast && <Toast message={toast.message} type={toast.type} onHide={hide} />}
+
+      {/* In-App Payment WebView */}
+      <Modal visible={webviewVisible} animationType="slide" onRequestClose={() => setWebviewVisible(false)}>
+        <View style={{ flex: 1, paddingTop: 50, backgroundColor: "#fff" }}>
+          <View style={s.webviewHeader}>
+            <Text style={s.webviewTitle}>Interswitch Payment</Text>
+            <TouchableOpacity onPress={() => setWebviewVisible(false)}>
+              <Ionicons name="close" size={24} color="#111827" />
+            </TouchableOpacity>
+          </View>
+          {webviewUrl && (
+            <WebView
+              source={{ uri: webviewUrl }}
+              style={{ flex: 1 }}
+              startInLoadingState
+              renderLoading={() => (
+                <View style={s.webviewLoading}>
+                  <ActivityIndicator size="large" color="#16a34a" />
+                  <Text style={s.webviewLoadingText}>Loading payment page…</Text>
+                </View>
+              )}
+              onNavigationStateChange={(navState) => {
+                // Interswitch redirects to our /verify/:ref URL after payment
+                if (navState.url?.includes("/api/payments/verify/") && pendingRef) {
+                  verifyPayment(pendingRef);
+                }
+              }}
+            />
+          )}
+        </View>
+      </Modal>
 
       {/* Patient Picker Modal */}
       <Modal visible={pickerOpen} animationType="slide" onRequestClose={() => setPickerOpen(false)}>
@@ -115,7 +171,7 @@ export default function PaymentsScreen() {
             renderItem={({ item }) => (
               <TouchableOpacity
                 style={s.patientRow}
-                onPress={() => { setSelected(item); setPickerOpen(false); setReceipt(null); }}
+                onPress={() => { setSelected(item); setPickerOpen(false); setReceipt(null); setPendingRef(null); setWebviewUrl(null); }}
               >
                 <View style={s.avatar}>
                   <Text style={s.avatarText}>{item.name?.[0]?.toUpperCase()}</Text>
@@ -140,7 +196,6 @@ export default function PaymentsScreen() {
             <Text style={s.sectionTitle}>Process Payment</Text>
           </View>
 
-          {/* Patient Picker */}
           <Text style={s.label}>Patient</Text>
           <TouchableOpacity style={[s.picker, errors.patient ? s.pickerError : null]} onPress={() => setPickerOpen(true)}>
             {selected ? (
@@ -180,11 +235,23 @@ export default function PaymentsScreen() {
             </View>
           ))}
 
-          <TouchableOpacity style={[s.btn, loading && s.btnDisabled]} onPress={initiatePayment} disabled={loading}>
+          <TouchableOpacity style={[s.btn, loading && s.btnDisabled]} onPress={initiatePayment} disabled={loading || !!pendingRef}>
             {loading
               ? <ActivityIndicator color="#fff" />
-              : <><Ionicons name="card-outline" size={18} color="#fff" /><Text style={s.btnText}> Initiate Payment</Text></>}
+              : <><Ionicons name="card-outline" size={18} color="#fff" /><Text style={s.btnText}> Pay with Interswitch</Text></>}
           </TouchableOpacity>
+
+          {pendingRef && (
+            <View style={s.verifyBanner}>
+              <View style={{ flex: 1 }}>
+                <Text style={s.verifyTitle}>Payment in progress</Text>
+                <Text style={s.verifyRef}>Ref: {pendingRef}</Text>
+              </View>
+              <TouchableOpacity style={s.openBtn} onPress={() => setWebviewVisible(true)}>
+                <Text style={s.openBtnText}>Resume Payment</Text>
+              </TouchableOpacity>
+            </View>
+          )}
 
           {receipt && (
             <View style={s.receipt}>
@@ -193,13 +260,16 @@ export default function PaymentsScreen() {
                 <Text style={s.receiptTitle}>Payment Receipt</Text>
               </View>
               <View style={s.receiptRow}><Text style={s.receiptKey}>Reference</Text><Text style={s.receiptVal}>{receipt.transactionRef}</Text></View>
-              <View style={s.receiptRow}><Text style={s.receiptKey}>Service</Text><Text style={s.receiptVal}>{receipt.payment?.service}</Text></View>
-              <View style={s.receiptRow}><Text style={s.receiptKey}>Amount</Text><Text style={s.receiptVal}>₦{receipt.payment?.amount}</Text></View>
+              <View style={s.receiptRow}><Text style={s.receiptKey}>Service</Text><Text style={s.receiptVal}>{receipt.service}</Text></View>
+              <View style={s.receiptRow}><Text style={s.receiptKey}>Amount</Text><Text style={s.receiptVal}>₦{receipt.amount}</Text></View>
+              {receipt.interswitchRef && (
+                <View style={s.receiptRow}><Text style={s.receiptKey}>Interswitch Ref</Text><Text style={s.receiptVal}>{receipt.interswitchRef}</Text></View>
+              )}
               <View style={s.receiptRow}>
                 <Text style={s.receiptKey}>Status</Text>
-                <View style={[s.statusBadge, { backgroundColor: cfg(receipt.payment?.status).bg }]}>
-                  <Text style={[s.statusText, { color: cfg(receipt.payment?.status).color }]}>
-                    {receipt.payment?.status?.toUpperCase()}
+                <View style={[s.statusBadge, { backgroundColor: cfg(receipt.status).bg }]}>
+                  <Text style={[s.statusText, { color: cfg(receipt.status).color }]}>
+                    {receipt.status?.toUpperCase()}
                   </Text>
                 </View>
               </View>
@@ -284,13 +354,23 @@ const s = StyleSheet.create({
   patientName: { fontSize: 15, fontWeight: "600", color: "#111827" },
   patientMeta: { fontSize: 12, color: "#6b7280", marginTop: 1 },
   empty: { textAlign: "center", color: "#9ca3af", marginTop: 40, fontSize: 14 },
+  // Verify banner
+  verifyBanner: { flexDirection: "row", alignItems: "center", backgroundColor: "#fef3c7", borderRadius: 12, padding: 14, marginTop: 12, gap: 10, borderWidth: 1, borderColor: "#fde68a" },
+  verifyTitle: { fontSize: 13, fontWeight: "700", color: "#92400e" },
+  verifyRef: { fontSize: 11, color: "#b45309", marginTop: 2 },
+  openBtn: { backgroundColor: "#0891b2", borderRadius: 10, paddingHorizontal: 14, paddingVertical: 10 },
+  openBtnText: { color: "#fff", fontWeight: "700", fontSize: 13, textAlign: "center" },
+  webviewHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1, borderColor: "#f3f4f6" },
+  webviewTitle: { fontSize: 16, fontWeight: "700", color: "#111827" },
+  webviewLoading: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0, justifyContent: "center", alignItems: "center", gap: 12, backgroundColor: "#fff" },
+  webviewLoadingText: { fontSize: 14, color: "#6b7280" },
   // Receipt
   receipt: { marginTop: 16, backgroundColor: "#f0fdf4", borderRadius: 12, padding: 14, borderWidth: 1, borderColor: "#bbf7d0" },
   receiptHead: { flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 12 },
   receiptTitle: { fontSize: 14, fontWeight: "700", color: "#111827" },
   receiptRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingVertical: 6, borderBottomWidth: 1, borderBottomColor: "#e5e7eb" },
   receiptKey: { fontSize: 13, color: "#6b7280" },
-  receiptVal: { fontSize: 13, fontWeight: "600", color: "#111827" },
+  receiptVal: { fontSize: 13, fontWeight: "600", color: "#111827", flexShrink: 1, textAlign: "right", marginLeft: 8 },
   statusBadge: { borderRadius: 6, paddingHorizontal: 8, paddingVertical: 3 },
   statusText: { fontSize: 11, fontWeight: "700" },
   emptyWrap: { alignItems: "center", paddingVertical: 20, gap: 8 },

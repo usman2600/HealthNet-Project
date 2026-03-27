@@ -29,7 +29,12 @@ router.post("/explain", async (req, res) => {
       }
     );
 
-    if (!response.ok) throw new Error("AI service unavailable");
+    if (!response.ok) {
+      const errData = await response.json().catch(() => ({}));
+      const errMsg = errData?.error?.message || `Gemini API error (${response.status})`;
+      console.error("Gemini error:", errMsg);
+      throw new Error(errMsg);
+    }
 
     const data = await response.json();
     const explanation = data.candidates?.[0]?.content?.parts?.[0]?.text;

@@ -39,6 +39,7 @@ export default function PaymentsScreen() {
   const [showPay, setShowPay]   = useState(false);
   const [loading, setLoading]   = useState(false);
   const [receipt, setReceipt]   = useState<any>(null);
+  const [iswConfig, setIswConfig] = useState<{ merchantCode: string; payItemId: string; mode: "TEST" | "LIVE" } | null>(null);
 
   // History
   const [history, setHistory]           = useState<Payment[]>([]);
@@ -102,27 +103,31 @@ export default function PaymentsScreen() {
     setShowPay(false);
     console.log("ISW response:", JSON.stringify(response));
 
-    const success = response?.responseCode === "00" ||
-                    response?.txnRef === txnRef;
+    const responseCode = response?.resp || response?.responseCode;
+    const ref = response?.txnref || response?.txnRef || txnRef;
+    const success = responseCode === "00";
+    const cancelled = responseCode === "Z6";
 
-    // Update status on backend
     try {
       await api.post("/payments/confirm", {
         transactionRef: txnRef,
-        responseCode: response?.responseCode,
-        interswitchRef: response?.transactionRef || response?.txnRef,
+        responseCode,
+        interswitchRef: response?.retRef || response?.payRef || ref,
       });
     } catch {}
 
     setReceipt({
-      status: success ? "success" : response?.responseCode === "Z6" ? "cancelled" : "failed",
+      status: success ? "success" : cancelled ? "cancelled" : "failed",
       transactionRef: txnRef,
       service,
       amount: parseFloat(amount),
-      responseCode: response?.responseCode,
+      responseCode,
     });
 
-    show(success ? "Payment successful!" : "Payment was not completed.", success ? "success" : "warning");
+    show(
+      success ? "Payment successful!" : cancelled ? "Payment cancelled." : "Payment failed.",
+      success ? "success" : "warning"
+    );
     loadHistory();
   };
 

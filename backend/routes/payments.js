@@ -87,7 +87,7 @@ router.post("/confirm", protect, async (req, res) => {
     const { transactionRef, responseCode, interswitchRef } = req.body;
     const payment = await Payment.findOne({ transactionRef });
     if (!payment) return res.status(404).json({ message: "Transaction not found" });
-    payment.status = responseCode === "00" ? "success" : "failed";
+    payment.status = responseCode === "00" ? "success" : responseCode === "Z6" ? "pending" : "failed";
     if (interswitchRef) payment.interswitchRef = interswitchRef;
     await payment.save();
     res.json({ status: payment.status, transactionRef });

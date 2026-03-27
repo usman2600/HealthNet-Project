@@ -78,25 +78,35 @@ router.post("/initiate", protect, async (req, res) => {
   }
 });
 
-// GET /api/payments/verify/:ref  — PUBLIC: called by Interswitch redirect OR app
+// GET /api/payments/verify/:ref  — PUBLIC: WebView navigates here after Interswitch redirect
 router.get("/verify/:ref", async (req, res) => {
   try {
     const payment = await Payment.findOne({ transactionRef: req.params.ref });
-    if (!payment) return res.status(404).json({ message: "Transaction not found" });
+    if (!payment) return res.status(404).send("Transaction not found");
 
     const token = await getAccessToken();
-
-    // Requery Interswitch for real status
     const { data } = await axios.get(
       `${BASE_URL}/collections/api/v1/gettransaction.json?merchantcode=${MERCHANT_CODE}&transactionreference=${req.params.ref}&amount=${Math.round(payment.amount * 100)}`,
       { headers: { Authorization: `Bearer ${token}` } }
     );
 
-    // Interswitch responseCode "00" = success
     payment.status = data.ResponseCode === "00" ? "success" : "failed";
     payment.interswitchRef = data.TransactionReference || null;
     await payment.save();
 
+    // Return HTML so WebView detects the URL change and app handles the rest
+    res.send(`<html><body><h2>Payment ${payment.status}. Return to the app.</h2></body></html>`);
+  } catch (err) {
+    console.error("Verify error:", err.response?.data || err.message);
+    res.status(500).send("Verification failed");
+  }
+});
+
+// GET /api/payments/status/:ref  — protected, app polls this after WebView closes
+router.get("/status/:ref", protect, async (req, res) => {
+  try {
+    const payment = await Payment.findOne({ transactionRef: req.params.ref });
+    if (!payment) return res.status(404).json({ message: "Transaction not found" });
     res.json({
       status: payment.status,
       transactionRef: payment.transactionRef,
@@ -105,8 +115,7 @@ router.get("/verify/:ref", async (req, res) => {
       interswitchRef: payment.interswitchRef,
     });
   } catch (err) {
-    console.error("Verify error:", err.response?.data || err.message);
-    res.status(500).json({ message: err.response?.data?.message || err.message });
+    res.status(500).json({ message: err.message });
   }
 });
 

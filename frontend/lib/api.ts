@@ -3,7 +3,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 
 const API_BASE = "https://healthnet-project-production.up.railway.app/api"; // Android emulator → localhost; change for physical device
 
-const api = axios.create({ baseURL: API_BASE, timeout: 10000 });
+const api = axios.create({ baseURL: API_BASE, timeout: 30000 });
 
 api.interceptors.request.use(async (config) => {
   const token = await AsyncStorage.getItem("token");

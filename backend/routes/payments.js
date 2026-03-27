@@ -37,6 +37,41 @@ function buildAuthHeader(method, resourcePath, body = "") {
   return `InterswitchAuth ${token}`;
 }
 
+// GET /api/payments/debug — test Interswitch connectivity and auth
+router.get("/debug", protect, async (req, res) => {
+  try {
+    const resourcePath = "/api/v2/purchases";
+    const bodyObj = { test: true };
+    const bodyStr = JSON.stringify(bodyObj);
+    const authHeader = buildAuthHeader("POST", resourcePath, bodyStr);
+
+    // Just test auth header generation and connectivity
+    let interswitchReachable = false;
+    let interswitchResponse = null;
+    try {
+      const r = await axios.post(`${BASE_URL}${resourcePath}`, bodyObj, {
+        headers: { Authorization: authHeader, "Content-Type": "application/json" },
+        timeout: 10000,
+      });
+      interswitchReachable = true;
+      interswitchResponse = r.data;
+    } catch (e: any) {
+      interswitchReachable = e.response ? true : false;
+      interswitchResponse = e.response?.data || e.message;
+    }
+
+    res.json({
+      BASE_URL,
+      CLIENT_ID: CLIENT_ID?.slice(0, 8) + "...",
+      authHeaderPreview: authHeader.slice(0, 40) + "...",
+      interswitchReachable,
+      interswitchResponse,
+    });
+  } catch (err: any) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
 // POST /api/payments/initiate — create pending record
 router.post("/initiate", protect, async (req, res) => {
   try {

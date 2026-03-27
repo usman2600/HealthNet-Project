@@ -1,10 +1,10 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect } from "react";
 import {
   View, Text, StyleSheet, TextInput, TouchableOpacity,
   ScrollView, ActivityIndicator, FlatList, Modal,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { IswPaymentWebView, type IswWebViewRefMethods } from "@interswitchapi/ipg-react-native";
+import { WebView } from "react-native-webview";
 import api from "@/lib/api";
 import Toast from "@/components/Toast";
 import { useToast } from "@/hooks/use-toast";
@@ -18,36 +18,74 @@ const STATUS_CONFIG: Record<string, { color: string; bg: string; icon: string }>
   pending: { color: "#d97706", bg: "#fef3c7", icon: "time" },
 };
 
+const MERCHANT_CODE = "MX6072";
+const PAY_ITEM_ID   = "9405967";
+
+function buildCheckoutHTML(txnRef: string, amountKobo: number, custEmail: string, custName: string) {
+  return `<!DOCTYPE html>
+<html>
+<head>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: sans-serif; background: #f0fdf4; display: flex; align-items: center; justify-content: center; min-height: 100vh; }
+    .loader { text-align: center; padding: 40px; }
+    .spinner { width: 40px; height: 40px; border: 4px solid #e5e7eb; border-top-color: #16a34a; border-radius: 50%; animation: spin 0.8s linear infinite; margin: 0 auto 16px; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    p { color: #6b7280; font-size: 14px; }
+  </style>
+</head>
+<body>
+  <div class="loader">
+    <div class="spinner"></div>
+    <p>Loading Interswitch Checkout…</p>
+  </div>
+  <script src="https://newwebpay.qa.interswitchng.com/inline-checkout.js"></script>
+  <script>
+    function paymentCallback(response) {
+      window.ReactNativeWebView.postMessage(JSON.stringify(response));
+    }
+
+    window.addEventListener('load', function() {
+      setTimeout(function() {
+        window.webpayCheckout({
+          merchant_code: "${MERCHANT_CODE}",
+          pay_item_id: "${PAY_ITEM_ID}",
+          txn_ref: "${txnRef}",
+          amount: ${amountKobo},
+          currency: 566,
+          cust_email: "${custEmail}",
+          cust_name: "${custName}",
+          mode: "TEST",
+          onComplete: paymentCallback
+        });
+      }, 500);
+    });
+  </script>
+</body>
+</html>`;
+}
+
 export default function PaymentsScreen() {
   const { toast, show, hide } = useToast();
-  const paymentRef = useRef<IswWebViewRefMethods>(null);
 
-  // Patient picker
-  const [patients, setPatients]   = useState<Patient[]>([]);
-  const [search, setSearch]       = useState("");
+  const [patients, setPatients]     = useState<Patient[]>([]);
+  const [search, setSearch]         = useState("");
   const [pickerOpen, setPickerOpen] = useState(false);
-  const [selected, setSelected]   = useState<Patient | null>(null);
+  const [selected, setSelected]     = useState<Patient | null>(null);
 
-  // Form
   const [service, setService] = useState("");
   const [amount, setAmount]   = useState("");
   const [email, setEmail]     = useState("");
   const [errors, setErrors]   = useState<Record<string, string>>({});
 
-  // Flow
-  const [txnRef, setTxnRef]     = useState<string>("");
-  const [showPay, setShowPay]   = useState(false);
-  const [loading, setLoading]   = useState(false);
-  const [receipt, setReceipt]   = useState<any>(null);
-  const [iswConfig, setIswConfig] = useState<{ merchantCode: string; payItemId: string; mode: "TEST" | "LIVE"; clientId: string } | null>(null);
+  const [txnRef, setTxnRef]   = useState<string | null>(null);
+  const [showPay, setShowPay] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [receipt, setReceipt] = useState<any>(null);
 
-  // History
-  const [history, setHistory]           = useState<Payment[]>([]);
+  const [history, setHistory]               = useState<Payment[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
-
-  useEffect(() => {
-    api.get("/payments/config").then(({ data }) => setIswConfig(data)).catch(() => {});
-  }, []);
 
   useEffect(() => {
     api.get("/patients?limit=100").then(({ data }) => {
@@ -80,7 +118,6 @@ export default function PaymentsScreen() {
     return Object.keys(e).length === 0;
   };
 
-  // Step 1: create pending record on backend, then launch SDK
   const handleProceed = async () => {
     if (!validate()) return;
     setLoading(true);
@@ -92,58 +129,85 @@ export default function PaymentsScreen() {
         email,
       });
       setTxnRef(data.transactionRef);
-      // Log the URL the SDK will build
-      const amountKobo = Math.round(parseFloat(amount) * 100);
-      console.log("ISW checkout URL will be: https://isw-inline-checkout-webview.k8.isw.la?pay_item_id=" + iswConfig?.payItemId + "&txn_ref=" + data.transactionRef + "&amount=" + amountKobo + "&merchant_code=" + iswConfig?.merchantCode + "&mode=TEST&currency=566");
       setShowPay(true);
     } catch (err: any) {
       show(err.message || "Could not initiate payment.", "error");
     } finally { setLoading(false); }
   };
 
-  // Step 2: SDK calls onCompleted when done
-  const handleCompleted = async (response: any) => {
-    setShowPay(false);
-    console.log("ISW response:", JSON.stringify(response));
-
-    const responseCode = response?.resp || response?.responseCode;
-    const ref = response?.txnref || response?.txnRef || txnRef;
-    const success = responseCode === "00";
-    const cancelled = responseCode === "Z6";
-
+  const handleMessage = async (event: any) => {
     try {
-      await api.post("/payments/confirm", {
+      const response = JSON.parse(event.nativeEvent.data);
+      console.log("ISW response:", JSON.stringify(response));
+      setShowPay(false);
+
+      const responseCode = response?.resp;
+      const success = responseCode === "00";
+      const cancelled = responseCode === "Z6";
+
+      // Server-side verify
+      try {
+        await api.post("/payments/confirm", {
+          transactionRef: txnRef,
+          responseCode,
+          interswitchRef: response?.payRef || response?.retRef,
+        });
+      } catch {}
+
+      setReceipt({
+        status: success ? "success" : cancelled ? "cancelled" : "failed",
         transactionRef: txnRef,
+        service,
+        amount: parseFloat(amount),
         responseCode,
-        interswitchRef: response?.retRef || response?.payRef || ref,
+        desc: response?.desc,
       });
+
+      show(
+        success ? "Payment successful!" : cancelled ? "Payment cancelled." : `Payment failed: ${response?.desc || responseCode}`,
+        success ? "success" : "warning"
+      );
+      loadHistory();
     } catch {}
-
-    setReceipt({
-      status: success ? "success" : cancelled ? "cancelled" : "failed",
-      transactionRef: txnRef,
-      service,
-      amount: parseFloat(amount),
-      responseCode,
-    });
-
-    show(
-      success ? "Payment successful!" : cancelled ? "Payment cancelled." : "Payment failed.",
-      success ? "success" : "warning"
-    );
-    loadHistory();
   };
 
   const resetFlow = () => {
-    setReceipt(null); setTxnRef(""); setShowPay(false);
+    setReceipt(null); setTxnRef(null); setShowPay(false);
     setService(""); setAmount(""); setEmail(""); setErrors({});
   };
 
   const cfg = (status: string) => STATUS_CONFIG[status] ?? STATUS_CONFIG.pending;
 
+  const amountKobo = amount ? Math.round(parseFloat(amount) * 100) : 0;
+  const custEmail  = email || "patient@healthnet.ng";
+  const custName   = selected?.name || "Patient";
+
   return (
     <View style={{ flex: 1 }}>
       {toast && <Toast message={toast.message} type={toast.type} onHide={hide} />}
+
+      {/* Interswitch Checkout Modal */}
+      <Modal visible={showPay} animationType="slide" onRequestClose={() => setShowPay(false)}>
+        <View style={{ flex: 1, paddingTop: 50, backgroundColor: "#fff" }}>
+          <View style={s.webviewHeader}>
+            <Ionicons name="lock-closed-outline" size={16} color="#16a34a" />
+            <Text style={s.webviewTitle}>Secure Payment</Text>
+            <TouchableOpacity onPress={() => setShowPay(false)}>
+              <Ionicons name="close" size={24} color="#6b7280" />
+            </TouchableOpacity>
+          </View>
+          {txnRef && (
+            <WebView
+              source={{ html: buildCheckoutHTML(txnRef, amountKobo, custEmail, custName) }}
+              onMessage={handleMessage}
+              javaScriptEnabled
+              domStorageEnabled
+              originWhitelist={["*"]}
+              style={{ flex: 1 }}
+            />
+          )}
+        </View>
+      </Modal>
 
       {/* Patient Picker Modal */}
       <Modal visible={pickerOpen} animationType="slide" onRequestClose={() => setPickerOpen(false)}>
@@ -229,40 +293,6 @@ export default function PaymentsScreen() {
           </View>
         )}
 
-        {/* Interswitch SDK WebView — inline, full section */}
-        {showPay && txnRef && iswConfig && (
-          <View style={s.iswSection}>
-            <View style={s.sectionHead}>
-              <Ionicons name="lock-closed-outline" size={18} color="#7c3aed" />
-              <Text style={s.sectionTitle}>Secure Payment</Text>
-              <TouchableOpacity onPress={() => setShowPay(false)}>
-                <Ionicons name="close" size={22} color="#6b7280" />
-              </TouchableOpacity>
-            </View>
-            <IswPaymentWebView
-              ref={paymentRef}
-              autoStart
-              trnxRef={txnRef}
-              merchantCode={iswConfig.merchantCode}
-              payItem={{ id: iswConfig.payItemId, name: service }}
-              amount={Math.round(parseFloat(amount) * 100)}
-              currency={566}
-              mode={iswConfig.mode}
-              accessToken={iswConfig.clientId}
-              customer={{
-                id: selected!._id,
-                name: selected!.name,
-                email: email || "patient@healthnet.ng",
-              }}
-              onCompleted={handleCompleted}
-              showBackdrop
-              indicatorColor="#16a34a"
-              loadingText="Connecting to Interswitch…"
-              style={{ height: 520 }}
-            />
-          </View>
-        )}
-
         {/* Receipt */}
         {receipt && (
           <View style={s.section}>
@@ -273,13 +303,14 @@ export default function PaymentsScreen() {
               <Text style={s.receiptTitle}>
                 {receipt.status === "success" ? "Payment Successful" : receipt.status === "cancelled" ? "Payment Cancelled" : "Payment Failed"}
               </Text>
+              {receipt.desc ? <Text style={s.receiptDesc}>{receipt.desc}</Text> : null}
             </View>
 
             {[
               { k: "Reference", v: receipt.transactionRef },
               { k: "Service",   v: receipt.service },
               { k: "Amount",    v: `₦${receipt.amount?.toLocaleString()}` },
-              { k: "Response",  v: receipt.responseCode || "-" },
+              { k: "Code",      v: receipt.responseCode || "-" },
             ].map(({ k, v }) => (
               <View key={k} style={s.receiptRow}>
                 <Text style={s.receiptKey}>{k}</Text>
@@ -349,7 +380,6 @@ const s = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#f0fdf4" },
   content: { padding: 16, paddingBottom: 40 },
   section: { backgroundColor: "#fff", borderRadius: 16, padding: 18, marginBottom: 16, elevation: 2, shadowColor: "#000", shadowOpacity: 0.05, shadowRadius: 6 },
-  iswSection: { backgroundColor: "#fff", borderRadius: 16, padding: 16, marginBottom: 16, elevation: 2, shadowColor: "#000", shadowOpacity: 0.05, shadowRadius: 6, minHeight: 580 },
   sectionHead: { flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 16 },
   sectionTitle: { fontSize: 16, fontWeight: "700", color: "#111827", flex: 1 },
   label: { fontSize: 12, fontWeight: "600", color: "#6b7280", marginBottom: 5, marginTop: 10 },
@@ -373,9 +403,12 @@ const s = StyleSheet.create({
   patientName: { fontSize: 15, fontWeight: "600", color: "#111827" },
   patientMeta: { fontSize: 12, color: "#6b7280", marginTop: 1 },
   empty: { textAlign: "center", color: "#9ca3af", marginTop: 40, fontSize: 14 },
-  receiptHead: { alignItems: "center", marginBottom: 16, gap: 8 },
+  webviewHeader: { flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1, borderColor: "#f3f4f6" },
+  webviewTitle: { fontSize: 16, fontWeight: "700", color: "#111827", flex: 1 },
+  receiptHead: { alignItems: "center", marginBottom: 16, gap: 6 },
   receiptIcon: { width: 64, height: 64, borderRadius: 32, justifyContent: "center", alignItems: "center" },
   receiptTitle: { fontSize: 18, fontWeight: "700", color: "#111827" },
+  receiptDesc: { fontSize: 13, color: "#6b7280", textAlign: "center" },
   receiptRow: { flexDirection: "row", justifyContent: "space-between", paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: "#f3f4f6" },
   receiptKey: { fontSize: 13, color: "#6b7280" },
   receiptVal: { fontSize: 13, fontWeight: "600", color: "#111827" },

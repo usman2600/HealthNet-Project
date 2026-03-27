@@ -8,6 +8,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { useAuth } from "@/context/AuthContext";
 import Toast from "@/components/Toast";
 import { useToast } from "@/hooks/use-toast";
+import { C } from "@/constants/theme";
 
 export default function LoginScreen() {
   const { login } = useAuth();
@@ -44,23 +45,25 @@ export default function LoginScreen() {
     <KeyboardAvoidingView style={s.container} behavior={Platform.OS === "ios" ? "padding" : undefined}>
       {toast && <Toast message={toast.message} type={toast.type} onHide={hide} />}
 
-      <View style={s.card}>
+      <View style={s.inner}>
+        {/* Logo */}
         <View style={s.logoWrap}>
           <View style={s.logoCircle}>
-            <Ionicons name="medkit" size={32} color="#16a34a" />
+            <Ionicons name="medkit" size={28} color={C.primary} />
           </View>
           <Text style={s.logoText}>HealthNet</Text>
           <Text style={s.subtitle}>Community Health Worker Portal</Text>
         </View>
 
+        {/* Email */}
         <View style={s.field}>
-          <Text style={s.label}>Email Address</Text>
+          <Text style={s.label}>Email</Text>
           <View style={[s.inputWrap, errors.email ? s.inputError : null]}>
-            <Ionicons name="mail-outline" size={18} color="#9ca3af" style={s.inputIcon} />
+            <Ionicons name="mail-outline" size={17} color={C.textMuted} />
             <TextInput
               style={s.input}
               placeholder="you@example.com"
-              placeholderTextColor="#9ca3af"
+              placeholderTextColor={C.textMuted}
               keyboardType="email-address"
               autoCapitalize="none"
               value={email}
@@ -70,29 +73,28 @@ export default function LoginScreen() {
           {errors.email && <Text style={s.errorText}>{errors.email}</Text>}
         </View>
 
+        {/* Password */}
         <View style={s.field}>
           <Text style={s.label}>Password</Text>
           <View style={[s.inputWrap, errors.password ? s.inputError : null]}>
-            <Ionicons name="lock-closed-outline" size={18} color="#9ca3af" style={s.inputIcon} />
+            <Ionicons name="lock-closed-outline" size={17} color={C.textMuted} />
             <TextInput
               style={s.input}
               placeholder="Enter your password"
-              placeholderTextColor="#9ca3af"
+              placeholderTextColor={C.textMuted}
               secureTextEntry={!showPass}
               value={password}
               onChangeText={(v) => { setPassword(v); setErrors((e) => ({ ...e, password: undefined })); }}
             />
-            <TouchableOpacity onPress={() => setShowPass((p) => !p)} style={s.eyeBtn}>
-              <Ionicons name={showPass ? "eye-off-outline" : "eye-outline"} size={18} color="#9ca3af" />
+            <TouchableOpacity onPress={() => setShowPass((p) => !p)}>
+              <Ionicons name={showPass ? "eye-off-outline" : "eye-outline"} size={17} color={C.textMuted} />
             </TouchableOpacity>
           </View>
           {errors.password && <Text style={s.errorText}>{errors.password}</Text>}
         </View>
 
         <TouchableOpacity style={[s.btn, loading && s.btnDisabled]} onPress={handleLogin} disabled={loading}>
-          {loading
-            ? <ActivityIndicator color="#fff" />
-            : <Text style={s.btnText}>Sign In</Text>}
+          {loading ? <ActivityIndicator color="#fff" /> : <Text style={s.btnText}>Sign In</Text>}
         </TouchableOpacity>
 
         <TouchableOpacity style={s.linkBtn} onPress={() => router.push("/(auth)/register")}>
@@ -104,24 +106,33 @@ export default function LoginScreen() {
 }
 
 const s = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#f0fdf4", justifyContent: "center", padding: 24 },
-  card: { backgroundColor: "#fff", borderRadius: 20, padding: 28, shadowColor: "#000", shadowOpacity: 0.08, shadowRadius: 16, elevation: 5 },
-  logoWrap: { alignItems: "center", marginBottom: 28 },
-  logoCircle: { width: 68, height: 68, borderRadius: 34, backgroundColor: "#dcfce7", justifyContent: "center", alignItems: "center", marginBottom: 12 },
-  logoText: { fontSize: 26, fontWeight: "800", color: "#111827" },
-  subtitle: { fontSize: 13, color: "#6b7280", marginTop: 4 },
-  field: { marginBottom: 16 },
-  label: { fontSize: 13, fontWeight: "600", color: "#374151", marginBottom: 6 },
-  inputWrap: { flexDirection: "row", alignItems: "center", borderWidth: 1.5, borderColor: "#e5e7eb", borderRadius: 12, backgroundColor: "#f9fafb", paddingHorizontal: 12 },
-  inputError: { borderColor: "#dc2626", backgroundColor: "#fef2f2" },
-  inputIcon: { marginRight: 8 },
-  input: { flex: 1, paddingVertical: 13, fontSize: 15, color: "#111827" },
-  eyeBtn: { padding: 4 },
-  errorText: { fontSize: 12, color: "#dc2626", marginTop: 4, marginLeft: 2 },
-  btn: { backgroundColor: "#16a34a", borderRadius: 12, padding: 15, alignItems: "center", marginTop: 8 },
-  btnDisabled: { opacity: 0.7 },
+  container: { flex: 1, backgroundColor: C.bg, justifyContent: "center", padding: 24 },
+  inner: { gap: 0 },
+  logoWrap: { alignItems: "center", marginBottom: 36 },
+  logoCircle: {
+    width: 64, height: 64, borderRadius: 32,
+    backgroundColor: C.primaryLight,
+    justifyContent: "center", alignItems: "center", marginBottom: 14,
+  },
+  logoText: { fontSize: 26, fontWeight: "800", color: C.text },
+  subtitle: { fontSize: 13, color: C.textSub, marginTop: 4 },
+  field: { marginBottom: 14 },
+  label: { fontSize: 13, fontWeight: "600", color: C.text, marginBottom: 6 },
+  inputWrap: {
+    flexDirection: "row", alignItems: "center", gap: 10,
+    borderWidth: 1, borderColor: C.borderMid, borderRadius: C.radius,
+    backgroundColor: C.surface, paddingHorizontal: 14, paddingVertical: 2,
+  },
+  inputError: { borderColor: C.error, backgroundColor: C.errorLight },
+  input: { flex: 1, paddingVertical: 13, fontSize: 15, color: C.text },
+  errorText: { fontSize: 12, color: C.error, marginTop: 4 },
+  btn: {
+    backgroundColor: C.primary, borderRadius: C.radius,
+    padding: 15, alignItems: "center", marginTop: 8,
+  },
+  btnDisabled: { opacity: 0.6 },
   btnText: { color: "#fff", fontWeight: "700", fontSize: 16 },
-  linkBtn: { marginTop: 20, alignItems: "center" },
-  link: { fontSize: 14, color: "#6b7280" },
-  linkBold: { color: "#16a34a", fontWeight: "700" },
+  linkBtn: { marginTop: 24, alignItems: "center" },
+  link: { fontSize: 14, color: C.textSub },
+  linkBold: { color: C.primary, fontWeight: "700" },
 });

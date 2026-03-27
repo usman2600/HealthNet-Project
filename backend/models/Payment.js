@@ -6,7 +6,7 @@ const paymentSchema = new mongoose.Schema(
     amount: { type: Number, required: true },
     currency: { type: String, default: "NGN" },
     service: { type: String, required: true },
-    status: { type: String, enum: ["pending", "success", "failed"], default: "pending" },
+    status: { type: String, enum: ["pending", "success", "failed", "cancelled"], default: "pending" },
     transactionRef: { type: String, unique: true },
     interswitchRef: { type: String },
     processedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" },

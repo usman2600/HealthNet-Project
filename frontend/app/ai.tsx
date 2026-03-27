@@ -7,6 +7,7 @@ import { Ionicons } from "@expo/vector-icons";
 import api from "@/lib/api";
 import Toast from "@/components/Toast";
 import { useToast } from "@/hooks/use-toast";
+import { C } from "@/constants/theme";
 
 const TYPES = [
   { key: "prescription", label: "Prescription", icon: "medical-outline" },
@@ -16,13 +17,13 @@ const TYPES = [
 
 export default function AIScreen() {
   const { toast, show, hide } = useToast();
-  const [text, setText] = useState("");
-  const [type, setType] = useState("prescription");
+  const [text, setText]           = useState("");
+  const [type, setType]           = useState("prescription");
   const [explanation, setExplanation] = useState("");
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading]     = useState(false);
 
   const explain = async () => {
-    if (!text.trim()) { show("Please enter some medical text to explain.", "warning"); return; }
+    if (!text.trim()) { show("Please enter some medical text.", "warning"); return; }
     setLoading(true);
     setExplanation("");
     try {
@@ -30,44 +31,45 @@ export default function AIScreen() {
       setExplanation(data.explanation);
     } catch (err: any) {
       show(err.message || "AI explanation failed. Please try again.", "error");
-    } finally {
-      setLoading(false);
-    }
+    } finally { setLoading(false); }
   };
 
   return (
-    <View style={{ flex: 1 }}>
+    <View style={{ flex: 1, backgroundColor: C.bg }}>
       {toast && <Toast message={toast.message} type={toast.type} onHide={hide} />}
-      <ScrollView style={s.container} contentContainerStyle={s.content} keyboardShouldPersistTaps="handled">
+      <ScrollView contentContainerStyle={s.content} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
 
+        {/* Header */}
         <View style={s.header}>
           <View style={s.headerIcon}>
-            <Ionicons name="sparkles" size={28} color="#d97706" />
+            <Ionicons name="sparkles" size={26} color="#d97706" />
           </View>
           <Text style={s.headerTitle}>AI Medical Explainer</Text>
-          <Text style={s.headerSub}>Translate complex medical terms into simple, clear language</Text>
+          <Text style={s.headerSub}>Translate complex medical terms into simple language</Text>
         </View>
 
-        <Text style={s.label}>Type of Information</Text>
+        {/* Type Selector */}
+        <Text style={s.label}>Type</Text>
         <View style={s.typeRow}>
           {TYPES.map((t) => (
             <TouchableOpacity
               key={t.key}
               style={[s.typeBtn, type === t.key && s.typeBtnActive]}
               onPress={() => setType(t.key)}
-              activeOpacity={0.75}
+              activeOpacity={0.7}
             >
-              <Ionicons name={t.icon as any} size={16} color={type === t.key ? "#fff" : "#6b7280"} />
+              <Ionicons name={t.icon as any} size={15} color={type === t.key ? "#fff" : C.textSub} />
               <Text style={[s.typeText, type === t.key && s.typeTextActive]}>{t.label}</Text>
             </TouchableOpacity>
           ))}
         </View>
 
+        {/* Input */}
         <Text style={s.label}>Medical Text</Text>
         <TextInput
           style={s.textArea}
           placeholder={`Paste ${type.replace("_", " ")} here…\n\ne.g. Amoxicillin 500mg TDS x 5/7`}
-          placeholderTextColor="#9ca3af"
+          placeholderTextColor={C.textMuted}
           value={text}
           onChangeText={setText}
           multiline
@@ -76,27 +78,28 @@ export default function AIScreen() {
 
         <TouchableOpacity style={[s.btn, loading && s.btnDisabled]} onPress={explain} disabled={loading}>
           {loading
-            ? <><ActivityIndicator color="#fff" size="small" /><Text style={s.btnText}>  Explaining…</Text></>
-            : <><Ionicons name="sparkles-outline" size={18} color="#fff" /><Text style={s.btnText}> Explain in Simple Terms</Text></>}
+            ? <><ActivityIndicator color="#fff" size="small" /><Text style={s.btnText}>Explaining…</Text></>
+            : <><Ionicons name="sparkles-outline" size={17} color="#fff" /><Text style={s.btnText}>Explain in Simple Terms</Text></>}
         </TouchableOpacity>
 
+        {/* Result */}
         {explanation ? (
           <View style={s.resultCard}>
             <View style={s.resultHeader}>
               <View style={s.resultIconWrap}>
-                <Ionicons name="checkmark-circle" size={20} color="#16a34a" />
+                <Ionicons name="checkmark-circle" size={18} color={C.primary} />
               </View>
               <Text style={s.resultTitle}>Simplified Explanation</Text>
             </View>
             <Text style={s.resultText}>{explanation}</Text>
             <TouchableOpacity style={s.clearBtn} onPress={() => { setExplanation(""); setText(""); }}>
-              <Ionicons name="refresh-outline" size={14} color="#6b7280" />
+              <Ionicons name="refresh-outline" size={13} color={C.textMuted} />
               <Text style={s.clearBtnText}>Clear & Start Over</Text>
             </TouchableOpacity>
           </View>
         ) : !loading && (
           <View style={s.emptyState}>
-            <Ionicons name="document-text-outline" size={40} color="#d1d5db" />
+            <Ionicons name="document-text-outline" size={38} color={C.borderMid} />
             <Text style={s.emptyText}>Your explanation will appear here</Text>
           </View>
         )}
@@ -106,29 +109,46 @@ export default function AIScreen() {
 }
 
 const s = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#f0fdf4" },
   content: { padding: 16, paddingBottom: 40 },
-  header: { alignItems: "center", paddingVertical: 20, marginBottom: 8 },
-  headerIcon: { width: 64, height: 64, borderRadius: 32, backgroundColor: "#fef3c7", justifyContent: "center", alignItems: "center", marginBottom: 12 },
-  headerTitle: { fontSize: 20, fontWeight: "800", color: "#111827" },
-  headerSub: { fontSize: 13, color: "#6b7280", marginTop: 4, textAlign: "center", paddingHorizontal: 16 },
-  label: { fontSize: 13, fontWeight: "600", color: "#374151", marginBottom: 8, marginTop: 16 },
+  header: { alignItems: "center", paddingVertical: 24, marginBottom: 4 },
+  headerIcon: {
+    width: 60, height: 60, borderRadius: 30,
+    backgroundColor: "#fef3c7",
+    justifyContent: "center", alignItems: "center", marginBottom: 12,
+  },
+  headerTitle: { fontSize: 20, fontWeight: "800", color: C.text },
+  headerSub: { fontSize: 13, color: C.textSub, marginTop: 4, textAlign: "center", paddingHorizontal: 20 },
+  label: { fontSize: 13, fontWeight: "600", color: C.text, marginBottom: 8, marginTop: 16 },
   typeRow: { flexDirection: "row", gap: 8 },
-  typeBtn: { flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 5, borderWidth: 1.5, borderColor: "#e5e7eb", borderRadius: 12, padding: 10 },
+  typeBtn: {
+    flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 5,
+    borderWidth: 1, borderColor: C.borderMid, borderRadius: C.radius,
+    padding: 10, backgroundColor: C.surface,
+  },
   typeBtnActive: { backgroundColor: "#d97706", borderColor: "#d97706" },
-  typeText: { fontSize: 12, color: "#6b7280", fontWeight: "600" },
+  typeText: { fontSize: 12, color: C.textSub, fontWeight: "600" },
   typeTextActive: { color: "#fff" },
-  textArea: { borderWidth: 1.5, borderColor: "#e5e7eb", borderRadius: 14, padding: 14, fontSize: 14, color: "#111827", backgroundColor: "#fff", height: 150, marginBottom: 4 },
-  btn: { backgroundColor: "#d97706", borderRadius: 14, padding: 15, flexDirection: "row", justifyContent: "center", alignItems: "center", gap: 6, marginTop: 16 },
-  btnDisabled: { opacity: 0.7 },
+  textArea: {
+    borderWidth: 1, borderColor: C.borderMid, borderRadius: C.radius,
+    padding: 14, fontSize: 14, color: C.text,
+    backgroundColor: C.surface, height: 140,
+  },
+  btn: {
+    backgroundColor: "#d97706", borderRadius: C.radius, padding: 15,
+    flexDirection: "row", justifyContent: "center", alignItems: "center", gap: 8, marginTop: 16,
+  },
+  btnDisabled: { opacity: 0.6 },
   btnText: { color: "#fff", fontWeight: "700", fontSize: 15 },
-  resultCard: { backgroundColor: "#fff", borderRadius: 16, padding: 18, marginTop: 20, borderLeftWidth: 4, borderLeftColor: "#16a34a", elevation: 2, shadowColor: "#000", shadowOpacity: 0.05, shadowRadius: 6 },
+  resultCard: {
+    backgroundColor: C.surface, borderRadius: C.radius, padding: 18, marginTop: 20,
+    borderLeftWidth: 3, borderLeftColor: C.primary, ...C.shadow,
+  },
   resultHeader: { flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 12 },
-  resultIconWrap: { width: 32, height: 32, borderRadius: 16, backgroundColor: "#dcfce7", justifyContent: "center", alignItems: "center" },
-  resultTitle: { fontSize: 15, fontWeight: "700", color: "#111827" },
-  resultText: { fontSize: 14, color: "#374151", lineHeight: 23 },
+  resultIconWrap: { width: 30, height: 30, borderRadius: 15, backgroundColor: C.primaryLight, justifyContent: "center", alignItems: "center" },
+  resultTitle: { fontSize: 14, fontWeight: "700", color: C.text },
+  resultText: { fontSize: 14, color: C.text, lineHeight: 23 },
   clearBtn: { flexDirection: "row", alignItems: "center", gap: 5, marginTop: 14, alignSelf: "flex-start" },
-  clearBtnText: { fontSize: 12, color: "#6b7280" },
+  clearBtnText: { fontSize: 12, color: C.textMuted },
   emptyState: { alignItems: "center", paddingVertical: 32, gap: 8 },
-  emptyText: { fontSize: 13, color: "#9ca3af" },
+  emptyText: { fontSize: 13, color: C.textMuted },
 });

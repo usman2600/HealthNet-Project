@@ -4,9 +4,9 @@ const axios = require("axios");
 const Payment = require("../models/Payment");
 const { protect } = require("../middleware/auth");
 
-const QA_URL       = "https://qa.interswitchng.com";
-const MERCHANT_CODE = "MX6072";
-const PAY_ITEM_ID   = "9405967";
+const ISW_BASE_URL  = process.env.INTERSWITCH_BASE_URL || "https://sandbox.interswitchng.com";
+const MERCHANT_CODE = process.env.INTERSWITCH_MERCHANT_CODE || "MX276417";
+const PAY_ITEM_ID   = process.env.INTERSWITCH_PAY_ITEM_ID   || "Default_Payable_MX276417";
 
 const generateRef = () =>
   `HN-${Date.now()}-${crypto.randomBytes(4).toString("hex").toUpperCase()}`;
@@ -45,11 +45,11 @@ router.post("/confirm", protect, async (req, res) => {
     try {
       const amountKobo = Math.round(payment.amount * 100);
       const { data } = await axios.get(
-        `${QA_URL}/collections/api/v1/gettransaction.json?merchantcode=${MERCHANT_CODE}&transactionreference=${transactionRef}&amount=${amountKobo}`,
+        `${ISW_BASE_URL}/collections/api/v1/gettransaction.json?merchantcode=${MERCHANT_CODE}&transactionreference=${transactionRef}&amount=${amountKobo}`,
         { headers: { "Content-Type": "application/json" }, timeout: 10000 }
       );
       console.log("ISW verify response:", JSON.stringify(data));
-      payment.status = data.ResponseCode === "00" ? "success" : "failed";
+      payment.status = data.ResponseCode === "00" ? "success" : data.ResponseCode === "Z6" ? "cancelled" : "failed";
       payment.interswitchRef = data.PaymentReference || interswitchRef || null;
     } catch (e) {
       // Fallback to client-reported code if verify fails

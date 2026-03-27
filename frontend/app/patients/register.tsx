@@ -9,6 +9,7 @@ import api from "@/lib/api";
 import { enqueue } from "@/lib/storage";
 import Toast from "@/components/Toast";
 import { useToast } from "@/hooks/use-toast";
+import { C } from "@/constants/theme";
 
 export default function RegisterPatient() {
   const router = useRouter();
@@ -26,7 +27,8 @@ export default function RegisterPatient() {
     const e: Record<string, string> = {};
     if (!form.name.trim()) e.name = "Full name is required";
     if (!form.age.trim()) e.age = "Age is required";
-    else if (isNaN(parseInt(form.age)) || parseInt(form.age) <= 0 || parseInt(form.age) > 120) e.age = "Enter a valid age (1–120)";
+    else if (isNaN(parseInt(form.age)) || parseInt(form.age) <= 0 || parseInt(form.age) > 120)
+      e.age = "Enter a valid age (1–120)";
     setErrors(e);
     return Object.keys(e).length === 0;
   };
@@ -50,11 +52,9 @@ export default function RegisterPatient() {
       setTimeout(() => router.back(), 1500);
     } catch {
       await enqueue({ type: "patient", data: payload, localId: payload.localId });
-      show("No connection — patient saved offline and will sync later.", "warning");
+      show("Saved offline — will sync when connected.", "warning");
       setTimeout(() => router.back(), 2000);
-    } finally {
-      setLoading(false);
-    }
+    } finally { setLoading(false); }
   };
 
   const genderOptions = [
@@ -64,16 +64,16 @@ export default function RegisterPatient() {
   ];
 
   return (
-    <View style={{ flex: 1 }}>
+    <View style={{ flex: 1, backgroundColor: C.bg }}>
       {toast && <Toast message={toast.message} type={toast.type} onHide={hide} />}
-      <ScrollView style={s.container} contentContainerStyle={s.content} keyboardShouldPersistTaps="handled">
+      <ScrollView contentContainerStyle={s.content} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
 
         <View style={s.field}>
-          <Text style={s.label}>Full Name <Text style={s.required}>*</Text></Text>
+          <Text style={s.label}>Full Name <Text style={s.req}>*</Text></Text>
           <TextInput
             style={[s.input, errors.name ? s.inputError : null]}
             placeholder="e.g. Amina Bello"
-            placeholderTextColor="#9ca3af"
+            placeholderTextColor={C.textMuted}
             value={form.name}
             onChangeText={set("name")}
           />
@@ -81,11 +81,11 @@ export default function RegisterPatient() {
         </View>
 
         <View style={s.field}>
-          <Text style={s.label}>Age <Text style={s.required}>*</Text></Text>
+          <Text style={s.label}>Age <Text style={s.req}>*</Text></Text>
           <TextInput
             style={[s.input, errors.age ? s.inputError : null]}
             placeholder="e.g. 34"
-            placeholderTextColor="#9ca3af"
+            placeholderTextColor={C.textMuted}
             keyboardType="numeric"
             value={form.age}
             onChangeText={set("age")}
@@ -94,7 +94,7 @@ export default function RegisterPatient() {
         </View>
 
         <View style={s.field}>
-          <Text style={s.label}>Gender <Text style={s.required}>*</Text></Text>
+          <Text style={s.label}>Gender <Text style={s.req}>*</Text></Text>
           <View style={s.genderRow}>
             {genderOptions.map((g) => (
               <TouchableOpacity
@@ -102,7 +102,7 @@ export default function RegisterPatient() {
                 style={[s.genderBtn, form.gender === g.value && s.genderBtnActive]}
                 onPress={() => set("gender")(g.value)}
               >
-                <Ionicons name={g.icon as any} size={16} color={form.gender === g.value ? "#fff" : "#6b7280"} />
+                <Ionicons name={g.icon as any} size={15} color={form.gender === g.value ? "#fff" : C.textSub} />
                 <Text style={[s.genderText, form.gender === g.value && s.genderTextActive]}>{g.label}</Text>
               </TouchableOpacity>
             ))}
@@ -114,7 +114,7 @@ export default function RegisterPatient() {
           <TextInput
             style={s.input}
             placeholder="e.g. 08012345678"
-            placeholderTextColor="#9ca3af"
+            placeholderTextColor={C.textMuted}
             keyboardType="phone-pad"
             value={form.phone}
             onChangeText={set("phone")}
@@ -126,7 +126,7 @@ export default function RegisterPatient() {
           <TextInput
             style={s.input}
             placeholder="Village / Town"
-            placeholderTextColor="#9ca3af"
+            placeholderTextColor={C.textMuted}
             value={form.address}
             onChangeText={set("address")}
           />
@@ -136,18 +136,18 @@ export default function RegisterPatient() {
           <Text style={s.label}>Known Allergies</Text>
           <TextInput
             style={s.input}
-            placeholder="e.g. Penicillin, Peanuts (comma-separated)"
-            placeholderTextColor="#9ca3af"
+            placeholder="e.g. Penicillin, Peanuts"
+            placeholderTextColor={C.textMuted}
             value={form.allergies}
             onChangeText={set("allergies")}
           />
-          <Text style={s.fieldHint}>Separate multiple allergies with commas</Text>
+          <Text style={s.hint}>Separate multiple allergies with commas</Text>
         </View>
 
         <TouchableOpacity style={[s.btn, loading && s.btnDisabled]} onPress={handleSubmit} disabled={loading}>
           {loading
             ? <ActivityIndicator color="#fff" />
-            : <><Ionicons name="person-add-outline" size={18} color="#fff" /><Text style={s.btnText}> Register Patient</Text></>}
+            : <><Ionicons name="person-add-outline" size={17} color="#fff" /><Text style={s.btnText}>Register Patient</Text></>}
         </TouchableOpacity>
       </ScrollView>
     </View>
@@ -155,21 +155,30 @@ export default function RegisterPatient() {
 }
 
 const s = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#f0fdf4" },
   content: { padding: 20, paddingBottom: 40 },
   field: { marginBottom: 18 },
-  label: { fontSize: 13, fontWeight: "600", color: "#374151", marginBottom: 6 },
-  required: { color: "#dc2626" },
-  input: { borderWidth: 1.5, borderColor: "#e5e7eb", borderRadius: 12, padding: 13, fontSize: 15, color: "#111827", backgroundColor: "#fff" },
-  inputError: { borderColor: "#dc2626", backgroundColor: "#fef2f2" },
-  errorText: { fontSize: 12, color: "#dc2626", marginTop: 4 },
-  fieldHint: { fontSize: 11, color: "#9ca3af", marginTop: 4 },
+  label: { fontSize: 13, fontWeight: "600", color: C.text, marginBottom: 6 },
+  req: { color: C.error },
+  input: {
+    borderWidth: 1, borderColor: C.borderMid, borderRadius: C.radius,
+    padding: 13, fontSize: 15, color: C.text, backgroundColor: C.surface,
+  },
+  inputError: { borderColor: C.error, backgroundColor: C.errorLight },
+  errorText: { fontSize: 12, color: C.error, marginTop: 4 },
+  hint: { fontSize: 11, color: C.textMuted, marginTop: 4 },
   genderRow: { flexDirection: "row", gap: 10 },
-  genderBtn: { flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, borderWidth: 1.5, borderColor: "#e5e7eb", borderRadius: 12, padding: 12 },
-  genderBtnActive: { backgroundColor: "#16a34a", borderColor: "#16a34a" },
-  genderText: { fontSize: 14, color: "#6b7280", fontWeight: "600" },
+  genderBtn: {
+    flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6,
+    borderWidth: 1, borderColor: C.borderMid, borderRadius: C.radius, padding: 12,
+    backgroundColor: C.surface,
+  },
+  genderBtnActive: { backgroundColor: C.primary, borderColor: C.primary },
+  genderText: { fontSize: 14, color: C.textSub, fontWeight: "600" },
   genderTextActive: { color: "#fff" },
-  btn: { backgroundColor: "#16a34a", borderRadius: 14, padding: 16, flexDirection: "row", justifyContent: "center", alignItems: "center", gap: 8, marginTop: 10 },
-  btnDisabled: { opacity: 0.7 },
+  btn: {
+    backgroundColor: C.primary, borderRadius: C.radius, padding: 16,
+    flexDirection: "row", justifyContent: "center", alignItems: "center", gap: 8, marginTop: 8,
+  },
+  btnDisabled: { opacity: 0.6 },
   btnText: { color: "#fff", fontWeight: "700", fontSize: 16 },
 });

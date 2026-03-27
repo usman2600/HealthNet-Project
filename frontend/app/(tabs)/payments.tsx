@@ -10,69 +10,27 @@ import Toast from "@/components/Toast";
 import { useToast } from "@/hooks/use-toast";
 
 type Patient = { _id: string; name: string; age?: number; gender?: string };
-type Payment = { _id: string; service: string; amount: number; status: string; transactionRef: string; createdAt: string };
+type Payment  = { _id: string; service: string; amount: number; status: string; transactionRef: string; createdAt: string };
 
 const STATUS_CONFIG: Record<string, { color: string; bg: string; icon: string }> = {
-  success: { color: "#16a34a", bg: "#dcfce7", icon: "checkmark-circle" },
-  failed:  { color: "#dc2626", bg: "#fee2e2", icon: "close-circle" },
-  pending: { color: "#d97706", bg: "#fef3c7", icon: "time" },
+  success:   { color: "#16a34a", bg: "#dcfce7", icon: "checkmark-circle" },
+  failed:    { color: "#dc2626", bg: "#fee2e2", icon: "close-circle" },
+  cancelled: { color: "#d97706", bg: "#fef3c7", icon: "close-circle-outline" },
+  pending:   { color: "#d97706", bg: "#fef3c7", icon: "time" },
 };
 
+// Interswitch shared sandbox credentials
 const MERCHANT_CODE = "MX6072";
 const PAY_ITEM_ID   = "9405967";
-
-function buildCheckoutHTML(txnRef: string, amountKobo: number, custEmail: string, custName: string) {
-  return `<!DOCTYPE html>
-<html>
-<head>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <style>
-    * { margin: 0; padding: 0; box-sizing: border-box; }
-    body { font-family: sans-serif; background: #f0fdf4; display: flex; align-items: center; justify-content: center; min-height: 100vh; }
-    .loader { text-align: center; padding: 40px; }
-    .spinner { width: 40px; height: 40px; border: 4px solid #e5e7eb; border-top-color: #16a34a; border-radius: 50%; animation: spin 0.8s linear infinite; margin: 0 auto 16px; }
-    @keyframes spin { to { transform: rotate(360deg); } }
-    p { color: #6b7280; font-size: 14px; }
-  </style>
-</head>
-<body>
-  <div class="loader">
-    <div class="spinner"></div>
-    <p>Loading Interswitch Checkout…</p>
-  </div>
-  <script src="https://newwebpay.qa.interswitchng.com/inline-checkout.js"></script>
-  <script>
-    function paymentCallback(response) {
-      window.ReactNativeWebView.postMessage(JSON.stringify(response));
-    }
-
-    window.addEventListener('load', function() {
-      setTimeout(function() {
-        window.webpayCheckout({
-          merchant_code: "${MERCHANT_CODE}",
-          pay_item_id: "${PAY_ITEM_ID}",
-          txn_ref: "${txnRef}",
-          amount: ${amountKobo},
-          currency: 566,
-          cust_email: "${custEmail}",
-          cust_name: "${custName}",
-          mode: "TEST",
-          onComplete: paymentCallback
-        });
-      }, 500);
-    });
-  </script>
-</body>
-</html>`;
-}
+const CHECKOUT_URL  = "https://newwebpay.qa.interswitchng.com/inline-checkout.js";
 
 export default function PaymentsScreen() {
   const { toast, show, hide } = useToast();
 
-  const [patients, setPatients]     = useState<Patient[]>([]);
-  const [search, setSearch]         = useState("");
-  const [pickerOpen, setPickerOpen] = useState(false);
-  const [selected, setSelected]     = useState<Patient | null>(null);
+  const [patients, setPatients]       = useState<Patient[]>([]);
+  const [search, setSearch]           = useState("");
+  const [pickerOpen, setPickerOpen]   = useState(false);
+  const [selected, setSelected]       = useState<Patient | null>(null);
 
   const [service, setService] = useState("");
   const [amount, setAmount]   = useState("");
@@ -142,10 +100,9 @@ export default function PaymentsScreen() {
       setShowPay(false);
 
       const responseCode = response?.resp;
-      const success = responseCode === "00";
+      const success   = responseCode === "00";
       const cancelled = responseCode === "Z6";
 
-      // Server-side verify
       try {
         await api.post("/payments/confirm", {
           transactionRef: txnRef,
@@ -164,7 +121,7 @@ export default function PaymentsScreen() {
       });
 
       show(
-        success ? "Payment successful!" : cancelled ? "Payment cancelled." : `Payment failed: ${response?.desc || responseCode}`,
+        success ? "Payment successful!" : cancelled ? "Payment cancelled." : "Payment failed.",
         success ? "success" : "warning"
       );
       loadHistory();
@@ -177,6 +134,44 @@ export default function PaymentsScreen() {
   };
 
   const cfg = (status: string) => STATUS_CONFIG[status] ?? STATUS_CONFIG.pending;
+
+  // JS injected into WebView after page loads — loads ISW script then triggers checkout
+  const getInjectedJS = (ref: string, kobo: number, custEmail: string, custName: string) => `
+    (function() {
+      var script = document.createElement('script');
+      script.src = '${CHECKOUT_URL}';
+      script.onload = function() {
+        var attempts = 0;
+        var poll = setInterval(function() {
+          attempts++;
+          if (typeof window.webpayCheckout === 'function') {
+            clearInterval(poll);
+            window.webpayCheckout({
+              merchant_code: '${MERCHANT_CODE}',
+              pay_item_id: '${PAY_ITEM_ID}',
+              txn_ref: '${ref}',
+              amount: ${kobo},
+              currency: 566,
+              cust_email: '${custEmail}',
+              cust_name: '${custName}',
+              mode: 'TEST',
+              onComplete: function(resp) {
+                window.ReactNativeWebView.postMessage(JSON.stringify(resp));
+              }
+            });
+          } else if (attempts > 20) {
+            clearInterval(poll);
+            window.ReactNativeWebView.postMessage(JSON.stringify({resp:'ERR',desc:'webpayCheckout not available'}));
+          }
+        }, 300);
+      };
+      script.onerror = function() {
+        window.ReactNativeWebView.postMessage(JSON.stringify({resp:'ERR',desc:'Failed to load checkout script'}));
+      };
+      document.head.appendChild(script);
+    })();
+    true;
+  `;
 
   const amountKobo = amount ? Math.round(parseFloat(amount) * 100) : 0;
   const custEmail  = email || "patient@healthnet.ng";
@@ -198,12 +193,20 @@ export default function PaymentsScreen() {
           </View>
           {txnRef && (
             <WebView
-              source={{ html: buildCheckoutHTML(txnRef, amountKobo, custEmail, custName) }}
+              source={{ uri: "https://newwebpay.qa.interswitchng.com" }}
+              injectedJavaScript={getInjectedJS(txnRef, amountKobo, custEmail, custName)}
               onMessage={handleMessage}
               javaScriptEnabled
               domStorageEnabled
               originWhitelist={["*"]}
               style={{ flex: 1 }}
+              renderLoading={() => (
+                <View style={s.webviewLoader}>
+                  <ActivityIndicator size="large" color="#16a34a" />
+                  <Text style={s.webviewLoaderText}>Connecting to Interswitch…</Text>
+                </View>
+              )}
+              startInLoadingState
             />
           )}
         </View>
@@ -405,6 +408,8 @@ const s = StyleSheet.create({
   empty: { textAlign: "center", color: "#9ca3af", marginTop: 40, fontSize: 14 },
   webviewHeader: { flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1, borderColor: "#f3f4f6" },
   webviewTitle: { fontSize: 16, fontWeight: "700", color: "#111827", flex: 1 },
+  webviewLoader: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0, justifyContent: "center", alignItems: "center", gap: 12, backgroundColor: "#fff" },
+  webviewLoaderText: { fontSize: 14, color: "#6b7280" },
   receiptHead: { alignItems: "center", marginBottom: 16, gap: 6 },
   receiptIcon: { width: 64, height: 64, borderRadius: 32, justifyContent: "center", alignItems: "center" },
   receiptTitle: { fontSize: 18, fontWeight: "700", color: "#111827" },

@@ -77,6 +77,7 @@ router.get("/config", protect, async (req, res) => {
   res.json({
     merchantCode: process.env.INTERSWITCH_MERCHANT_CODE,
     payItemId: process.env.INTERSWITCH_PAY_ITEM_ID,
+    clientId: process.env.INTERSWITCH_CLIENT_ID,
     mode: process.env.NODE_ENV === "production" ? "LIVE" : "TEST",
   });
 });

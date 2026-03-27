@@ -39,7 +39,7 @@ export default function PaymentsScreen() {
   const [showPay, setShowPay]   = useState(false);
   const [loading, setLoading]   = useState(false);
   const [receipt, setReceipt]   = useState<any>(null);
-  const [iswConfig, setIswConfig] = useState<{ merchantCode: string; payItemId: string; mode: "TEST" | "LIVE" } | null>(null);
+  const [iswConfig, setIswConfig] = useState<{ merchantCode: string; payItemId: string; mode: "TEST" | "LIVE"; clientId: string } | null>(null);
 
   // History
   const [history, setHistory]           = useState<Payment[]>([]);
@@ -92,6 +92,9 @@ export default function PaymentsScreen() {
         email,
       });
       setTxnRef(data.transactionRef);
+      // Log the URL the SDK will build
+      const amountKobo = Math.round(parseFloat(amount) * 100);
+      console.log("ISW checkout URL will be: https://isw-inline-checkout-webview.k8.isw.la?pay_item_id=" + iswConfig?.payItemId + "&txn_ref=" + data.transactionRef + "&amount=" + amountKobo + "&merchant_code=" + iswConfig?.merchantCode + "&mode=TEST&currency=566");
       setShowPay(true);
     } catch (err: any) {
       show(err.message || "Could not initiate payment.", "error");
@@ -245,6 +248,7 @@ export default function PaymentsScreen() {
               amount={Math.round(parseFloat(amount) * 100)}
               currency={566}
               mode={iswConfig.mode}
+              accessToken={iswConfig.clientId}
               customer={{
                 id: selected!._id,
                 name: selected!.name,

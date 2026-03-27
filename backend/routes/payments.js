@@ -72,6 +72,21 @@ router.get("/debug", protect, async (req, res) => {
   }
 });
 
+// POST /api/payments/confirm — called by app after SDK onCompleted
+router.post("/confirm", protect, async (req, res) => {
+  try {
+    const { transactionRef, responseCode, interswitchRef } = req.body;
+    const payment = await Payment.findOne({ transactionRef });
+    if (!payment) return res.status(404).json({ message: "Transaction not found" });
+    payment.status = responseCode === "00" ? "success" : "failed";
+    if (interswitchRef) payment.interswitchRef = interswitchRef;
+    await payment.save();
+    res.json({ status: payment.status, transactionRef });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
 // POST /api/payments/initiate — create pending record
 router.post("/initiate", protect, async (req, res) => {
   try {

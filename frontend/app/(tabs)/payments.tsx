@@ -1,9 +1,10 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import {
   View, Text, StyleSheet, TextInput, TouchableOpacity,
   ScrollView, ActivityIndicator, FlatList, Modal,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
+import { IswPaymentWebView, type IswWebViewRefMethods } from "@interswitchapi/ipg-react-native";
 import api from "@/lib/api";
 import Toast from "@/components/Toast";
 import { useToast } from "@/hooks/use-toast";
@@ -17,41 +18,33 @@ const STATUS_CONFIG: Record<string, { color: string; bg: string; icon: string }>
   pending: { color: "#d97706", bg: "#fef3c7", icon: "time" },
 };
 
-type Step = "form" | "card" | "otp" | "done";
+const MERCHANT_CODE = "MX26070";
+const PAY_ITEM_ID   = "Default_Payable_MX26070";
 
 export default function PaymentsScreen() {
   const { toast, show, hide } = useToast();
+  const paymentRef = useRef<IswWebViewRefMethods>(null);
 
   // Patient picker
-  const [patients, setPatients] = useState<Patient[]>([]);
-  const [search, setSearch] = useState("");
+  const [patients, setPatients]   = useState<Patient[]>([]);
+  const [search, setSearch]       = useState("");
   const [pickerOpen, setPickerOpen] = useState(false);
-  const [selected, setSelected] = useState<Patient | null>(null);
+  const [selected, setSelected]   = useState<Patient | null>(null);
 
-  // Payment form
+  // Form
   const [service, setService] = useState("");
-  const [amount, setAmount] = useState("");
-  const [email, setEmail] = useState("");
-  const [errors, setErrors] = useState<Record<string, string>>({});
-
-  // Card details
-  const [pan, setPan] = useState("");
-  const [expiry, setExpiry] = useState("");
-  const [cvv, setCvv] = useState("");
-  const [pin, setPin] = useState("");
-
-  // OTP
-  const [otp, setOtp] = useState("");
-  const [otpMessage, setOtpMessage] = useState("");
+  const [amount, setAmount]   = useState("");
+  const [email, setEmail]     = useState("");
+  const [errors, setErrors]   = useState<Record<string, string>>({});
 
   // Flow
-  const [step, setStep] = useState<Step>("form");
-  const [pendingRef, setPendingRef] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [receipt, setReceipt] = useState<any>(null);
+  const [txnRef, setTxnRef]     = useState<string>("");
+  const [showPay, setShowPay]   = useState(false);
+  const [loading, setLoading]   = useState(false);
+  const [receipt, setReceipt]   = useState<any>(null);
 
   // History
-  const [history, setHistory] = useState<Payment[]>([]);
+  const [history, setHistory]           = useState<Payment[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
 
   useEffect(() => {
@@ -60,9 +53,7 @@ export default function PaymentsScreen() {
     }).catch(() => {});
   }, []);
 
-  useEffect(() => {
-    if (selected) loadHistory();
-  }, [selected]);
+  useEffect(() => { if (selected) loadHistory(); }, [selected]);
 
   const loadHistory = async () => {
     if (!selected) return;
@@ -81,12 +72,13 @@ export default function PaymentsScreen() {
     const e: Record<string, string> = {};
     if (!selected) e.patient = "Please select a patient";
     if (!service.trim()) e.service = "Service is required";
-    if (!amount.trim() || isNaN(parseFloat(amount)) || parseFloat(amount) <= 0) e.amount = "Enter a valid amount";
+    if (!amount.trim() || isNaN(parseFloat(amount)) || parseFloat(amount) <= 0)
+      e.amount = "Enter a valid amount";
     setErrors(e);
     return Object.keys(e).length === 0;
   };
 
-  // Step 1: create pending record
+  // Step 1: create pending record on backend, then launch SDK
   const handleProceed = async () => {
     if (!validate()) return;
     setLoading(true);
@@ -97,72 +89,45 @@ export default function PaymentsScreen() {
         service,
         email,
       });
-      setPendingRef(data.transactionRef);
-      setStep("card");
+      setTxnRef(data.transactionRef);
+      setShowPay(true);
     } catch (err: any) {
       show(err.message || "Could not initiate payment.", "error");
     } finally { setLoading(false); }
   };
 
-  // Step 2: charge card
-  const handlePay = async () => {
-    if (!pan || !expiry || !cvv) { show("Fill in all card details.", "warning"); return; }
-    setLoading(true);
+  // Step 2: SDK calls onCompleted when done
+  const handleCompleted = async (response: any) => {
+    setShowPay(false);
+    console.log("ISW response:", JSON.stringify(response));
+
+    const success = response?.responseCode === "00" ||
+                    response?.txnRef === txnRef;
+
+    // Update status on backend
     try {
-      const { data } = await api.post("/payments/pay", {
-        transactionRef: pendingRef,
-        pan: pan.replace(/\s/g, ""),
-        expiry: expiry.replace("/", ""),
-        cvv,
-        pin,
+      await api.post("/payments/confirm", {
+        transactionRef: txnRef,
+        responseCode: response?.responseCode,
+        interswitchRef: response?.transactionRef || response?.txnRef,
       });
+    } catch {}
 
-      if (data.requiresOtp) {
-        setOtpMessage(data.message || "Enter the OTP sent to your phone.");
-        setStep("otp");
-      } else {
-        setReceipt(data);
-        setStep("done");
-        show(data.status === "success" ? "Payment successful!" : "Payment failed.", data.status === "success" ? "success" : "error");
-        loadHistory();
-      }
-    } catch (err: any) {
-      show(err.message || "Card charge failed.", "error");
-    } finally { setLoading(false); }
-  };
+    setReceipt({
+      status: success ? "success" : response?.responseCode === "Z6" ? "cancelled" : "failed",
+      transactionRef: txnRef,
+      service,
+      amount: parseFloat(amount),
+      responseCode: response?.responseCode,
+    });
 
-  // Step 3: submit OTP
-  const handleOtp = async () => {
-    if (!otp.trim()) { show("Enter the OTP.", "warning"); return; }
-    setLoading(true);
-    try {
-      const { data } = await api.post("/payments/otp", { transactionRef: pendingRef, otp });
-      setReceipt(data);
-      setStep("done");
-      show(data.status === "success" ? "Payment successful!" : "Payment failed.", data.status === "success" ? "success" : "error");
-      loadHistory();
-    } catch (err: any) {
-      show(err.message || "OTP verification failed.", "error");
-    } finally { setLoading(false); }
+    show(success ? "Payment successful!" : "Payment was not completed.", success ? "success" : "warning");
+    loadHistory();
   };
 
   const resetFlow = () => {
-    setStep("form"); setPendingRef(null); setReceipt(null);
-    setPan(""); setExpiry(""); setCvv(""); setPin(""); setOtp("");
-    setService(""); setAmount(""); setEmail("");
-    setErrors({});
-  };
-
-  // Format card number with spaces
-  const formatPan = (v: string) => {
-    const digits = v.replace(/\D/g, "").slice(0, 16);
-    return digits.replace(/(.{4})/g, "$1 ").trim();
-  };
-
-  // Format expiry MM/YY
-  const formatExpiry = (v: string) => {
-    const digits = v.replace(/\D/g, "").slice(0, 4);
-    return digits.length > 2 ? `${digits.slice(0, 2)}/${digits.slice(2)}` : digits;
+    setReceipt(null); setTxnRef(""); setShowPay(false);
+    setService(""); setAmount(""); setEmail(""); setErrors({});
   };
 
   const cfg = (status: string) => STATUS_CONFIG[status] ?? STATUS_CONFIG.pending;
@@ -211,8 +176,8 @@ export default function PaymentsScreen() {
 
       <ScrollView style={s.container} contentContainerStyle={s.content} keyboardShouldPersistTaps="handled">
 
-        {/* ── STEP: FORM ── */}
-        {step === "form" && (
+        {/* Payment Form */}
+        {!receipt && (
           <View style={s.section}>
             <View style={s.sectionHead}>
               <Ionicons name="card-outline" size={20} color="#16a34a" />
@@ -248,99 +213,55 @@ export default function PaymentsScreen() {
             <TextInput style={s.input} placeholder="patient@email.com" placeholderTextColor="#9ca3af" keyboardType="email-address" autoCapitalize="none" value={email} onChangeText={setEmail} />
 
             <TouchableOpacity style={[s.btn, loading && s.btnDisabled]} onPress={handleProceed} disabled={loading}>
-              {loading ? <ActivityIndicator color="#fff" /> : <><Ionicons name="arrow-forward-circle-outline" size={18} color="#fff" /><Text style={s.btnText}> Continue to Payment</Text></>}
+              {loading
+                ? <ActivityIndicator color="#fff" />
+                : <><Ionicons name="card-outline" size={18} color="#fff" /><Text style={s.btnText}> Pay with Interswitch</Text></>}
             </TouchableOpacity>
           </View>
         )}
 
-        {/* ── STEP: CARD ── */}
-        {step === "card" && (
-          <View style={s.section}>
+        {/* Interswitch SDK WebView — inline, full section */}
+        {showPay && txnRef && (
+          <View style={s.iswSection}>
             <View style={s.sectionHead}>
-              <Ionicons name="card-outline" size={20} color="#7c3aed" />
-              <Text style={s.sectionTitle}>Enter Card Details</Text>
+              <Ionicons name="lock-closed-outline" size={18} color="#7c3aed" />
+              <Text style={s.sectionTitle}>Secure Payment</Text>
+              <TouchableOpacity onPress={() => setShowPay(false)}>
+                <Ionicons name="close" size={22} color="#6b7280" />
+              </TouchableOpacity>
             </View>
-
-            <View style={s.summaryBadge}>
-              <Text style={s.summaryText}>{selected?.name} · {service} · ₦{parseFloat(amount).toLocaleString()}</Text>
-            </View>
-
-            <Text style={s.label}>Card Number</Text>
-            <TextInput
-              style={s.input}
-              placeholder="0000 0000 0000 0000"
-              placeholderTextColor="#9ca3af"
-              keyboardType="numeric"
-              value={pan}
-              onChangeText={(v) => setPan(formatPan(v))}
-              maxLength={19}
+            <IswPaymentWebView
+              ref={paymentRef}
+              autoStart
+              trnxRef={txnRef}
+              merchantCode={MERCHANT_CODE}
+              payItem={{ id: PAY_ITEM_ID, name: service }}
+              amount={Math.round(parseFloat(amount) * 100)}
+              currency={566}
+              mode="TEST"
+              customer={{
+                id: selected!._id,
+                name: selected!.name,
+                email: email || "patient@healthnet.ng",
+              }}
+              onCompleted={handleCompleted}
+              showBackdrop
+              indicatorColor="#16a34a"
+              loadingText="Connecting to Interswitch…"
+              style={{ height: 520 }}
             />
-
-            <View style={s.row}>
-              <View style={{ flex: 1 }}>
-                <Text style={s.label}>Expiry (MM/YY)</Text>
-                <TextInput style={s.input} placeholder="MM/YY" placeholderTextColor="#9ca3af" keyboardType="numeric" value={expiry} onChangeText={(v) => setExpiry(formatExpiry(v))} maxLength={5} />
-              </View>
-              <View style={{ width: 12 }} />
-              <View style={{ flex: 1 }}>
-                <Text style={s.label}>CVV</Text>
-                <TextInput style={s.input} placeholder="123" placeholderTextColor="#9ca3af" keyboardType="numeric" secureTextEntry value={cvv} onChangeText={setCvv} maxLength={4} />
-              </View>
-            </View>
-
-            <Text style={s.label}>Card PIN</Text>
-            <TextInput style={s.input} placeholder="••••" placeholderTextColor="#9ca3af" keyboardType="numeric" secureTextEntry value={pin} onChangeText={setPin} maxLength={4} />
-
-            <View style={s.secureNote}>
-              <Ionicons name="lock-closed-outline" size={13} color="#6b7280" />
-              <Text style={s.secureText}>Secured by Interswitch · PCI DSS Compliant</Text>
-            </View>
-
-            <TouchableOpacity style={[s.btn, s.btnPurple, loading && s.btnDisabled]} onPress={handlePay} disabled={loading}>
-              {loading ? <ActivityIndicator color="#fff" /> : <><Ionicons name="card-outline" size={18} color="#fff" /><Text style={s.btnText}> Pay ₦{parseFloat(amount).toLocaleString()}</Text></>}
-            </TouchableOpacity>
-
-            <TouchableOpacity style={s.backBtn} onPress={() => setStep("form")}>
-              <Text style={s.backBtnText}>← Back</Text>
-            </TouchableOpacity>
           </View>
         )}
 
-        {/* ── STEP: OTP ── */}
-        {step === "otp" && (
-          <View style={s.section}>
-            <View style={s.sectionHead}>
-              <Ionicons name="shield-checkmark-outline" size={20} color="#0891b2" />
-              <Text style={s.sectionTitle}>Enter OTP</Text>
-            </View>
-            <Text style={s.hint}>{otpMessage}</Text>
-
-            <Text style={s.label}>One-Time Password</Text>
-            <TextInput
-              style={[s.input, s.otpInput]}
-              placeholder="Enter OTP"
-              placeholderTextColor="#9ca3af"
-              keyboardType="numeric"
-              value={otp}
-              onChangeText={setOtp}
-              maxLength={8}
-            />
-
-            <TouchableOpacity style={[s.btn, s.btnBlue, loading && s.btnDisabled]} onPress={handleOtp} disabled={loading}>
-              {loading ? <ActivityIndicator color="#fff" /> : <><Ionicons name="checkmark-circle-outline" size={18} color="#fff" /><Text style={s.btnText}> Verify OTP</Text></>}
-            </TouchableOpacity>
-          </View>
-        )}
-
-        {/* ── STEP: DONE ── */}
-        {step === "done" && receipt && (
+        {/* Receipt */}
+        {receipt && (
           <View style={s.section}>
             <View style={s.receiptHead}>
               <View style={[s.receiptIcon, { backgroundColor: cfg(receipt.status).bg }]}>
                 <Ionicons name={cfg(receipt.status).icon as any} size={32} color={cfg(receipt.status).color} />
               </View>
               <Text style={s.receiptTitle}>
-                {receipt.status === "success" ? "Payment Successful" : "Payment Failed"}
+                {receipt.status === "success" ? "Payment Successful" : receipt.status === "cancelled" ? "Payment Cancelled" : "Payment Failed"}
               </Text>
             </View>
 
@@ -348,7 +269,7 @@ export default function PaymentsScreen() {
               { k: "Reference", v: receipt.transactionRef },
               { k: "Service",   v: receipt.service },
               { k: "Amount",    v: `₦${receipt.amount?.toLocaleString()}` },
-              ...(receipt.interswitchRef ? [{ k: "Interswitch Ref", v: receipt.interswitchRef }] : []),
+              { k: "Response",  v: receipt.responseCode || "-" },
             ].map(({ k, v }) => (
               <View key={k} style={s.receiptRow}>
                 <Text style={s.receiptKey}>{k}</Text>
@@ -356,7 +277,7 @@ export default function PaymentsScreen() {
               </View>
             ))}
 
-            <View style={[s.statusBadge, { backgroundColor: cfg(receipt.status).bg, alignSelf: "center", marginTop: 8 }]}>
+            <View style={[s.statusBadge, { backgroundColor: cfg(receipt.status).bg, alignSelf: "center", marginTop: 10 }]}>
               <Text style={[s.statusText, { color: cfg(receipt.status).color }]}>{receipt.status?.toUpperCase()}</Text>
             </View>
 
@@ -418,26 +339,20 @@ const s = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#f0fdf4" },
   content: { padding: 16, paddingBottom: 40 },
   section: { backgroundColor: "#fff", borderRadius: 16, padding: 18, marginBottom: 16, elevation: 2, shadowColor: "#000", shadowOpacity: 0.05, shadowRadius: 6 },
+  iswSection: { backgroundColor: "#fff", borderRadius: 16, padding: 16, marginBottom: 16, elevation: 2, shadowColor: "#000", shadowOpacity: 0.05, shadowRadius: 6, minHeight: 580 },
   sectionHead: { flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 16 },
   sectionTitle: { fontSize: 16, fontWeight: "700", color: "#111827", flex: 1 },
   label: { fontSize: 12, fontWeight: "600", color: "#6b7280", marginBottom: 5, marginTop: 10 },
   input: { borderWidth: 1.5, borderColor: "#e5e7eb", borderRadius: 10, padding: 12, fontSize: 14, color: "#111827", backgroundColor: "#f9fafb", marginBottom: 4 },
   inputError: { borderColor: "#dc2626", backgroundColor: "#fef2f2" },
   errorText: { fontSize: 12, color: "#dc2626", marginBottom: 4 },
-  row: { flexDirection: "row" },
   btn: { backgroundColor: "#16a34a", borderRadius: 12, padding: 14, flexDirection: "row", justifyContent: "center", alignItems: "center", gap: 6, marginTop: 16 },
-  btnPurple: { backgroundColor: "#7c3aed" },
-  btnBlue: { backgroundColor: "#0891b2" },
   btnDisabled: { opacity: 0.7 },
   btnText: { color: "#fff", fontWeight: "700", fontSize: 15 },
-  backBtn: { marginTop: 12, alignItems: "center" },
-  backBtnText: { color: "#6b7280", fontSize: 14 },
-  // Picker
   picker: { flexDirection: "row", alignItems: "center", borderWidth: 1.5, borderColor: "#e5e7eb", borderRadius: 10, padding: 12, backgroundColor: "#f9fafb", marginBottom: 4 },
   pickerError: { borderColor: "#dc2626", backgroundColor: "#fef2f2" },
   pickerPlaceholder: { flex: 1, color: "#9ca3af", fontSize: 14 },
   pickerSelected: { flex: 1, flexDirection: "row", alignItems: "center", gap: 10 },
-  // Modal
   modal: { flex: 1, backgroundColor: "#fff", paddingTop: 50 },
   modalHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingHorizontal: 16, paddingBottom: 12, borderBottomWidth: 1, borderColor: "#f3f4f6" },
   modalTitle: { fontSize: 18, fontWeight: "700", color: "#111827" },
@@ -448,24 +363,14 @@ const s = StyleSheet.create({
   patientName: { fontSize: 15, fontWeight: "600", color: "#111827" },
   patientMeta: { fontSize: 12, color: "#6b7280", marginTop: 1 },
   empty: { textAlign: "center", color: "#9ca3af", marginTop: 40, fontSize: 14 },
-  // Card
-  summaryBadge: { backgroundColor: "#f0fdf4", borderRadius: 10, padding: 10, marginBottom: 8, borderWidth: 1, borderColor: "#bbf7d0" },
-  summaryText: { fontSize: 13, color: "#16a34a", fontWeight: "600", textAlign: "center" },
-  secureNote: { flexDirection: "row", alignItems: "center", gap: 5, marginTop: 10, justifyContent: "center" },
-  secureText: { fontSize: 11, color: "#9ca3af" },
-  // OTP
-  hint: { fontSize: 13, color: "#6b7280", marginBottom: 12 },
-  otpInput: { fontSize: 22, textAlign: "center", letterSpacing: 8, fontWeight: "700" },
-  // Receipt
   receiptHead: { alignItems: "center", marginBottom: 16, gap: 8 },
   receiptIcon: { width: 64, height: 64, borderRadius: 32, justifyContent: "center", alignItems: "center" },
   receiptTitle: { fontSize: 18, fontWeight: "700", color: "#111827" },
-  receiptRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: "#f3f4f6" },
+  receiptRow: { flexDirection: "row", justifyContent: "space-between", paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: "#f3f4f6" },
   receiptKey: { fontSize: 13, color: "#6b7280" },
-  receiptVal: { fontSize: 13, fontWeight: "600", color: "#111827", flexShrink: 1, textAlign: "right", marginLeft: 8 },
+  receiptVal: { fontSize: 13, fontWeight: "600", color: "#111827" },
   statusBadge: { borderRadius: 6, paddingHorizontal: 10, paddingVertical: 4 },
   statusText: { fontSize: 12, fontWeight: "700" },
-  // History
   emptyWrap: { alignItems: "center", paddingVertical: 20, gap: 8 },
   emptyText: { fontSize: 13, color: "#9ca3af", textAlign: "center" },
   historyCard: { flexDirection: "row", alignItems: "center", gap: 12, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: "#f3f4f6" },

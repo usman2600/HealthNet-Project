@@ -44,7 +44,7 @@
         }
       ],
       [
-        "expo-barcode-scanner",
+        "expo-camera",
         {
           "cameraPermission": "Allow HealthNet to access camera for QR scanning."
         }

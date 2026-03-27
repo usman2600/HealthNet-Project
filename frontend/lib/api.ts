@@ -15,7 +15,9 @@ api.interceptors.response.use(
   (res) => res,
   (err) => {
     const message =
-      err.response?.data?.message || "Network error. Check your connection.";
+      err.response?.data?.message ||
+      err.response?.data?.description ||
+      (err.response ? `Server error (${err.response.status})` : "Network error. Check your connection.");
     return Promise.reject(new Error(message));
   },
 );

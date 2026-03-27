@@ -4,7 +4,7 @@ const axios = require("axios");
 const Payment = require("../models/Payment");
 const { protect } = require("../middleware/auth");
 
-const BASE_URL = process.env.INTERSWITCH_BASE_URL; // https://sandbox.interswitchng.com
+const BASE_URL = process.env.INTERSWITCH_BASE_URL;
 const CLIENT_ID = process.env.INTERSWITCH_CLIENT_ID;
 const CLIENT_SECRET = process.env.INTERSWITCH_CLIENT_SECRET;
 const PAYABLE_CODE = "Default_Payable_MX26070";
@@ -13,17 +13,31 @@ const MERCHANT_CODE = "MX26070";
 const generateRef = () =>
   `HN-${Date.now()}-${crypto.randomBytes(4).toString("hex").toUpperCase()}`;
 
-async function getAccessToken() {
-  const credentials = Buffer.from(`${CLIENT_ID}:${CLIENT_SECRET}`).toString("base64");
-  const { data } = await axios.post(
-    `${BASE_URL}/passport/oauth/token`,
-    "grant_type=client_credentials&scope=profile",
-    { headers: { Authorization: `Basic ${credentials}`, "Content-Type": "application/x-www-form-urlencoded" } }
-  );
-  return data.access_token;
+/**
+ * Interswitch MAC Auth header
+ * Format: InterswitchAuth <base64(clientId:timestamp:nonce:mac)>
+ * MAC = HMAC-SHA256(clientId + timestamp + nonce + httpMethod + resourcePath + bodyHash, clientSecret)
+ */
+function buildAuthHeader(method, resourcePath, body = "") {
+  const timestamp = Math.floor(Date.now() / 1000).toString();
+  const nonce = crypto.randomBytes(16).toString("hex");
+  const bodyHash = body
+    ? crypto.createHash("sha512").update(body).digest("base64")
+    : "";
+
+  const signatureString = [CLIENT_ID, timestamp, nonce, method.toUpperCase(), resourcePath, bodyHash]
+    .join("&");
+
+  const mac = crypto
+    .createHmac("sha256", CLIENT_SECRET)
+    .update(signatureString)
+    .digest("base64");
+
+  const token = Buffer.from(`${CLIENT_ID}:${timestamp}:${nonce}:${mac}`).toString("base64");
+  return `InterswitchAuth ${token}`;
 }
 
-// POST /api/payments/initiate — creates pending record, returns transactionRef
+// POST /api/payments/initiate — create pending record
 router.post("/initiate", protect, async (req, res) => {
   try {
     const { patientId, amount, service, email } = req.body;
@@ -46,11 +60,10 @@ router.post("/initiate", protect, async (req, res) => {
   }
 });
 
-// POST /api/payments/pay — charge card directly via Interswitch Purchase API
+// POST /api/payments/pay — charge card via Interswitch Direct Pay
 router.post("/pay", protect, async (req, res) => {
   try {
     const { transactionRef, pan, expiry, cvv, pin } = req.body;
-    // expiry format: MMYY
     if (!transactionRef || !pan || !expiry || !cvv)
       return res.status(400).json({ message: "Card details incomplete" });
 
@@ -58,78 +71,119 @@ router.post("/pay", protect, async (req, res) => {
     if (!payment) return res.status(404).json({ message: "Transaction not found" });
 
     const amountInKobo = Math.round(payment.amount * 100);
-    const token = await getAccessToken();
+    const resourcePath = "/api/v2/purchases";
 
-    // Build Interswitch Purchase request
-    const purchasePayload = {
+    const bodyObj = {
       customerId: payment._id.toString(),
       amount: amountInKobo,
       transactionRef,
       currency: "NGN",
       description: payment.service,
       cardNumber: pan.replace(/\s/g, ""),
-      cardExpiry: expiry, // MMYY
+      cardExpiry: expiry.replace("/", ""), // MMYY
       cardCvv: cvv,
       cardPin: pin || "",
       merchantCode: MERCHANT_CODE,
       payableCode: PAYABLE_CODE,
     };
 
-    const { data } = await axios.post(
-      `${BASE_URL}/api/v2/purchases`,
-      purchasePayload,
-      { headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" } }
-    );
+    const bodyStr = JSON.stringify(bodyObj);
+    const authHeader = buildAuthHeader("POST", resourcePath, bodyStr);
 
-    // Handle OTP/3DS challenge
-    if (data.responseCode === "T0" || data.responseCode === "S0") {
-      // OTP required
-      payment.interswitchRef = data.transactionRef || data.otpTransactionIdentifier;
+    const { data } = await axios.post(`${BASE_URL}${resourcePath}`, bodyObj, {
+      headers: {
+        Authorization: authHeader,
+        "Content-Type": "application/json",
+      },
+    });
+
+    console.log("Interswitch pay response:", JSON.stringify(data));
+
+    // OTP / 3DS required
+    if (["T0", "S0", "00 T0"].includes(data.responseCode)) {
+      payment.interswitchRef = data.otpTransactionIdentifier || data.transactionRef;
       await payment.save();
-      return res.json({ requiresOtp: true, message: data.message, otpRef: payment.interswitchRef });
+      return res.json({
+        requiresOtp: true,
+        message: data.message || "Enter the OTP sent to your registered phone.",
+        otpRef: payment.interswitchRef,
+      });
     }
 
     payment.status = data.responseCode === "00" ? "success" : "failed";
     payment.interswitchRef = data.transactionRef || null;
     await payment.save();
 
-    res.json({ status: payment.status, transactionRef, amount: payment.amount, service: payment.service, interswitchRef: payment.interswitchRef });
+    res.json({
+      status: payment.status,
+      transactionRef,
+      amount: payment.amount,
+      service: payment.service,
+      interswitchRef: payment.interswitchRef,
+      responseCode: data.responseCode,
+      responseDescription: data.responseDescription,
+    });
   } catch (err) {
     console.error("Pay error:", err.response?.data || err.message);
-    res.status(500).json({ message: err.response?.data?.message || err.message });
+    const msg = err.response?.data?.errors?.[0]?.defaultUserMessage
+      || err.response?.data?.description
+      || err.response?.data?.message
+      || err.message;
+    res.status(err.response?.status || 500).json({ message: msg });
   }
 });
 
-// POST /api/payments/otp — submit OTP for 3DS/OTP-challenged transactions
+// POST /api/payments/otp — validate OTP
 router.post("/otp", protect, async (req, res) => {
   try {
     const { transactionRef, otp } = req.body;
     const payment = await Payment.findOne({ transactionRef });
     if (!payment) return res.status(404).json({ message: "Transaction not found" });
 
-    const token = await getAccessToken();
-    const { data } = await axios.post(
-      `${BASE_URL}/api/v2/purchases/otps/auths`,
-      { otp, otpTransactionIdentifier: payment.interswitchRef, transactionRef },
-      { headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" } }
-    );
+    const resourcePath = "/api/v2/purchases/otps/auths";
+    const bodyObj = {
+      otp,
+      otpTransactionIdentifier: payment.interswitchRef,
+      transactionRef,
+    };
+    const bodyStr = JSON.stringify(bodyObj);
+    const authHeader = buildAuthHeader("POST", resourcePath, bodyStr);
+
+    const { data } = await axios.post(`${BASE_URL}${resourcePath}`, bodyObj, {
+      headers: { Authorization: authHeader, "Content-Type": "application/json" },
+    });
+
+    console.log("Interswitch OTP response:", JSON.stringify(data));
 
     payment.status = data.responseCode === "00" ? "success" : "failed";
     await payment.save();
 
-    res.json({ status: payment.status, transactionRef, amount: payment.amount, service: payment.service });
+    res.json({
+      status: payment.status,
+      transactionRef,
+      amount: payment.amount,
+      service: payment.service,
+      responseCode: data.responseCode,
+    });
   } catch (err) {
     console.error("OTP error:", err.response?.data || err.message);
-    res.status(500).json({ message: err.response?.data?.message || err.message });
+    const msg = err.response?.data?.description || err.response?.data?.message || err.message;
+    res.status(err.response?.status || 500).json({ message: msg });
   }
 });
 
-// GET /api/payments/status/:ref — get payment status
+// GET /api/payments/status/:ref
 router.get("/status/:ref", protect, async (req, res) => {
   try {
     const payment = await Payment.findOne({ transactionRef: req.params.ref });
     if (!payment) return res.status(404).json({ message: "Transaction not found" });
-    res.json({ status: payment.status, transactionRef: payment.transactionRef, amount: payment.amount, service: payment.service, interswitchRef: payment.interswitchRef });
+    res.json({
+      status: payment.status,
+      transactionRef: payment.transactionRef,
+      amount: payment.amount,
+      service: payment.service,
+      interswitchRef: payment.interswitchRef,
+    });
   } catch (err) {
     res.status(500).json({ message: err.message });
   }

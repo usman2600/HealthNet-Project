@@ -1,7 +1,7 @@
 import axios from "axios";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
-const API_BASE = "http://10.97.163.181:5000/api"; // Android emulator → localhost; change for physical device
+const API_BASE = "https://healthnet-project-production.up.railway.app/api"; // Android emulator → localhost; change for physical device
 
 const api = axios.create({ baseURL: API_BASE, timeout: 10000 });
 

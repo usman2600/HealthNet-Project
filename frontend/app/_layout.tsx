@@ -7,7 +7,7 @@ import { AuthProvider, useAuth } from "@/context/AuthContext";
 import { useColorScheme } from "@/hooks/use-color-scheme";
 import { ActivityIndicator, View } from "react-native";
 
-function RootGuard() {
+function RootGuard({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
   const segments = useSegments();
   const router = useRouter();
@@ -19,17 +19,16 @@ function RootGuard() {
     if (user && inAuth) router.replace("/(tabs)");
   }, [user, loading, segments]);
 
-  if (loading)
+  if (loading) {
     return (
-      <View style={{ flex: 1, justifyContent: "center", alignItems: "center" }}>
+      <View style={{ flex: 1, justifyContent: "center", alignItems: "center", backgroundColor: "#f0fdf4" }}>
         <ActivityIndicator size="large" color="#16a34a" />
       </View>
     );
+  }
 
-  return null;
+  return <>{children}</>;
 }
-
-export const unstable_settings = { anchor: "(tabs)" };
 
 export default function RootLayout() {
   const colorScheme = useColorScheme();
@@ -37,14 +36,15 @@ export default function RootLayout() {
   return (
     <AuthProvider>
       <ThemeProvider value={colorScheme === "dark" ? DarkTheme : DefaultTheme}>
-        <RootGuard />
-        <Stack>
-          <Stack.Screen name="(auth)" options={{ headerShown: false }} />
-          <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-          <Stack.Screen name="patients/register" options={{ title: "Register Patient", headerBackTitle: "Back" }} />
-          <Stack.Screen name="patients/[id]" options={{ title: "Patient Record", headerBackTitle: "Back" }} />
-          <Stack.Screen name="ai" options={{ title: "AI Explanation", headerBackTitle: "Back" }} />
-        </Stack>
+        <RootGuard>
+          <Stack>
+            <Stack.Screen name="(auth)" options={{ headerShown: false }} />
+            <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+            <Stack.Screen name="patients/register" options={{ title: "Register Patient", headerBackTitle: "Back" }} />
+            <Stack.Screen name="patients/[id]" options={{ title: "Patient Record", headerBackTitle: "Back" }} />
+            <Stack.Screen name="ai" options={{ title: "AI Explanation", headerBackTitle: "Back" }} />
+          </Stack>
+        </RootGuard>
         <StatusBar style="auto" />
       </ThemeProvider>
     </AuthProvider>

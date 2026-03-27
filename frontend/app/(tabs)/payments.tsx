@@ -18,9 +18,6 @@ const STATUS_CONFIG: Record<string, { color: string; bg: string; icon: string }>
   pending: { color: "#d97706", bg: "#fef3c7", icon: "time" },
 };
 
-const MERCHANT_CODE = "MX26070";
-const PAY_ITEM_ID   = "Default_Payable_MX26070";
-
 export default function PaymentsScreen() {
   const { toast, show, hide } = useToast();
   const paymentRef = useRef<IswWebViewRefMethods>(null);
@@ -46,6 +43,10 @@ export default function PaymentsScreen() {
   // History
   const [history, setHistory]           = useState<Payment[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
+
+  useEffect(() => {
+    api.get("/payments/config").then(({ data }) => setIswConfig(data)).catch(() => {});
+  }, []);
 
   useEffect(() => {
     api.get("/patients?limit=100").then(({ data }) => {
@@ -221,7 +222,7 @@ export default function PaymentsScreen() {
         )}
 
         {/* Interswitch SDK WebView — inline, full section */}
-        {showPay && txnRef && (
+        {showPay && txnRef && iswConfig && (
           <View style={s.iswSection}>
             <View style={s.sectionHead}>
               <Ionicons name="lock-closed-outline" size={18} color="#7c3aed" />
@@ -234,11 +235,11 @@ export default function PaymentsScreen() {
               ref={paymentRef}
               autoStart
               trnxRef={txnRef}
-              merchantCode={MERCHANT_CODE}
-              payItem={{ id: PAY_ITEM_ID, name: service }}
+              merchantCode={iswConfig.merchantCode}
+              payItem={{ id: iswConfig.payItemId, name: service }}
               amount={Math.round(parseFloat(amount) * 100)}
               currency={566}
-              mode="TEST"
+              mode={iswConfig.mode}
               customer={{
                 id: selected!._id,
                 name: selected!.name,

@@ -72,6 +72,15 @@ router.get("/debug", protect, async (req, res) => {
   }
 });
 
+// GET /api/payments/config — returns merchant config for SDK
+router.get("/config", protect, async (req, res) => {
+  res.json({
+    merchantCode: process.env.INTERSWITCH_MERCHANT_CODE,
+    payItemId: process.env.INTERSWITCH_PAY_ITEM_ID,
+    mode: process.env.NODE_ENV === "production" ? "LIVE" : "TEST",
+  });
+});
+
 // POST /api/payments/confirm — called by app after SDK onCompleted
 router.post("/confirm", protect, async (req, res) => {
   try {

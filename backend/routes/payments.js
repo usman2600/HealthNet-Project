@@ -48,28 +48,27 @@ router.post("/initiate", protect, async (req, res) => {
       status: "pending",
     });
 
-    // SHA-512 HMAC hash required by Interswitch: hash(transactionRef + amountInKobo)
-    const hash = crypto
-      .createHmac("sha512", CLIENT_SECRET)
-      .update(`${transactionRef}${amountInKobo}`)
-      .digest("hex");
+    // Interswitch Webpay hash: SHA512(clientId + transactionRef + amountInKobo)
+    const hashInput = `${CLIENT_ID}${transactionRef}${amountInKobo}`;
+    const hash = crypto.createHash("sha512").update(hashInput).digest("hex");
 
     const redirectUrl = `https://healthnet-project-production.up.railway.app/api/payments/verify/${transactionRef}`;
 
     const params = new URLSearchParams({
-      merchantCode: MERCHANT_CODE,
+      merchantcode: MERCHANT_CODE,
       payableCode: PAYABLE_CODE,
       amount: amountInKobo.toString(),
-      transactionReference: transactionRef,
-      currencyCode: "566",
-      customerEmail: email || "patient@healthnet.ng",
-      customerid: email || "patient@healthnet.ng",
+      txnref: transactionRef,
+      currency: "566",
+      cust_email: email || "patient@healthnet.ng",
+      cust_id: email || "patient@healthnet.ng",
       hash,
-      redirectUrl,
+      redirect_url: redirectUrl,
+      site_redirect_url: redirectUrl,
     });
 
-    // Correct Interswitch sandbox web checkout endpoint
-    const paymentUrl = `${BASE_URL}/collections/w/pay?${params.toString()}`;
+    // Interswitch Webpay sandbox checkout
+    const paymentUrl = `${BASE_URL}/webpay/pay?${params.toString()}`;
 
     res.json({ transactionRef, payment, paymentUrl });
   } catch (err) {
